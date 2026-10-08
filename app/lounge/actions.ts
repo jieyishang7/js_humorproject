@@ -4,7 +4,32 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
+
+type GeminiModel = { name: string; supportedGenerationMethods?: string[] };
+
+/**
+ * Picks a model this API key can actually use. Google retires model names over
+ * time, so instead of hard-coding one we ask the API for the current list and
+ * take the newest general-purpose "flash" model. GEMINI_MODEL overrides this.
+ */
+async function pickModel(apiKey: string): Promise<string> {
+  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
+
+  const response = await fetch(`${GEMINI_API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
+  const body = (await response.json().catch(() => null)) as { models?: GeminiModel[] } | null;
+  const usable = (body?.models ?? [])
+    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+    .map((m) => m.name.replace(/^models\//, ""))
+    .filter((name) => name.includes("flash") && !/(image|tts|audio|live|embedding|thinking|exp)/.test(name));
+
+  const stable = usable.filter((name) => !name.includes("preview"));
+  const candidates = (stable.length > 0 ? stable : usable).sort((a, b) =>
+    b.localeCompare(a, undefined, { numeric: true }),
+  );
+  // Prefer the full flash model over the lighter "-lite" variant of the same version.
+  return candidates.find((name) => !name.includes("lite")) ?? candidates[0] ?? "gemini-flash-latest";
+}
 
 function captionPrompt(title: string) {
   return [
@@ -45,7 +70,8 @@ export async function generateCaption(formData: FormData) {
     // Fall back to captioning from the title alone.
   }
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+  const model = await pickModel(apiKey);
+  const response = await fetch(`${GEMINI_API}/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({ contents: [{ parts }] }),
@@ -54,13 +80,13 @@ export async function generateCaption(formData: FormData) {
   const content: string | undefined = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
   if (!response.ok || !content) {
-    console.error("Gemini request failed:", response.status, result?.error?.message);
+    console.error("Gemini request failed:", model, response.status, result?.error?.message);
     redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
   }
 
   const { error } = await supabase
     .from("captions")
-    .insert({ joke_id: joke.id, author_id: user.id, prompt, model: MODEL, content: content.slice(0, 300) });
+    .insert({ joke_id: joke.id, author_id: user.id, prompt, model, content: content.slice(0, 300) });
   if (error) {
     console.error("Saving caption failed:", error.message);
     redirect("/lounge?error=Couldn't+save+the+caption.");
