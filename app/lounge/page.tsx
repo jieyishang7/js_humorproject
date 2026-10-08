@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getCaptions } from "@/lib/captions";
 import { getJokes, type Joke } from "@/lib/jokes";
+import { generateCaption, vote } from "./actions";
 import { displayName, getCurrentUser, initials, isProfileComplete } from "@/lib/profile";
 
 export const metadata: Metadata = { title: "The Green Room | js_humorproject" };
@@ -12,7 +14,8 @@ export const metadata: Metadata = { title: "The Green Room | js_humorproject" };
  * the check here is a second line of defence, and also makes sure the
  * user has filled in their name first.
  */
-export default async function LoungePage() {
+export default async function LoungePage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
   const { user, profile } = await getCurrentUser();
   if (!user) redirect("/login");
   if (!isProfileComplete(profile)) redirect("/welcome");
@@ -23,6 +26,8 @@ export default async function LoungePage() {
   } catch {
     jokes = [];
   }
+
+  const captions = await getCaptions(user.id);
 
   // Same pick for everyone on a given day.
   const today = new Date();
@@ -84,19 +89,69 @@ export default async function LoungePage() {
         </article>
       </div>
 
-      <section className="backstage">
-        <h2 className="section-label">Backstage rules</h2>
-        <ol className="rules">
-          <li>
-            <strong>Timing is everything.</strong> Especially when the assignment is due at 6 PM.
-          </li>
-          <li>
-            <strong>Know your audience.</strong> Your TA is the audience.
-          </li>
-          <li>
-            <strong>If it compiles, it&apos;s a feature.</strong> If it doesn&apos;t, it&apos;s a bit.
-          </li>
-        </ol>
+      <section className="backstage caption-lab" aria-labelledby="lab-title">
+        <h2 id="lab-title" className="section-label">Caption Lab · AI writes, you judge</h2>
+        {error && (
+          <p className="notice notice-error" role="alert">
+            {error}
+          </p>
+        )}
+        <ul className="lab-list">
+          {jokes.map((joke) => {
+            const forJoke = captions.filter((c) => c.joke_id === joke.id);
+            return (
+              <li key={joke.id} id={`joke-${joke.id}`} className="panel lab-item">
+                <div className="joke-image">
+                  <Image src={joke.image_url} alt={joke.title} fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
+                </div>
+                <div className="lab-body">
+                  <h3 className="pick-title">{joke.title}</h3>
+                  <form action={generateCaption}>
+                    <input type="hidden" name="joke_id" value={joke.id} />
+                    <button type="submit" className="btn btn-primary btn-small">
+                      ✨ Generate an AI caption
+                    </button>
+                  </form>
+                  {forJoke.length === 0 ? (
+                    <p className="hint">No captions yet. Be the first.</p>
+                  ) : (
+                    <ol className="caption-list">
+                      {forJoke.map((caption) => (
+                        <li key={caption.id} className="caption-row">
+                          <form action={vote} className="vote-box">
+                            <input type="hidden" name="caption_id" value={caption.id} />
+                            <button
+                              type="submit"
+                              name="value"
+                              value="1"
+                              className="vote-btn"
+                              data-active={caption.myVote === 1}
+                              aria-label="Upvote"
+                            >
+                              ▲
+                            </button>
+                            <span className="vote-score">{caption.score}</span>
+                            <button
+                              type="submit"
+                              name="value"
+                              value="-1"
+                              className="vote-btn"
+                              data-active={caption.myVote === -1}
+                              aria-label="Downvote"
+                            >
+                              ▼
+                            </button>
+                          </form>
+                          <p className="caption-text">{caption.content}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </section>
     </main>
   );
