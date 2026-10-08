@@ -1,16 +1,42 @@
 # js_humorproject
 
-Assignment 2 extends the original Next.js Hello World app into a responsive joke gallery. The homepage reads `id`, `title`, `image_url`, and `created_at` from Supabase's `public.jokes` table, ordered by `id` ascending. There is no authentication or local sample data.
+A Next.js 16 app for The Humor Project course.
 
-## Local setup
+- **Assignment 2** – the homepage reads `public.jokes` from Supabase and shows it as a gallery.
+- **Assignment 3** – Google sign-in through Supabase Auth, a `profiles` table filled by an `auth.users` trigger, a first-login name prompt, a Profile page (name, tagline, photo upload), and a members-only route.
 
-1. Run `npm ci`.
-2. Copy `.env.example` to `.env.local` and fill both values from your Supabase project's Connect dialog or API settings:
-   - `NEXT_PUBLIC_SUPABASE_URL`: your project URL.
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: your project's legacy anon key. Never use a service-role or secret key here.
-3. Run `npm run dev` and open http://localhost:3000.
+## Routes
 
-`.env.local` is ignored by Git. Restart the dev server after changing environment variables.
+| Route | Who can see it | What it does |
+| --- | --- | --- |
+| `/` | everyone | Joke gallery. The banner changes depending on whether you're signed in (gated UI). |
+| `/login` | signed-out visitors | "Continue with Google". Signed-in users are sent to `/lounge`. |
+| `/auth/callback` | — | OAuth redirect target. Exchanges the code for a session, then goes to `/welcome` (name missing) or `/lounge`. |
+| `/welcome` | signed in | Asks for first and last name if either is empty. |
+| `/profile` | signed in | Edit first name, last name, tagline; upload a profile photo. |
+| `/lounge` | signed in | "The Green Room": the protected, members-only page. |
+| `/auth/signout` (POST) | signed in | Signs out and returns to `/`. |
+
+Signed-out visitors who open `/lounge`, `/profile` or `/welcome` are redirected to `/login` by `proxy.ts` (Next.js 16's replacement for `middleware.ts`).
+
+## How it fits together
+
+- `lib/supabase/server.ts` / `client.ts` – Supabase clients from `@supabase/ssr`. The session lives in cookies, so server code knows who is signed in.
+- `proxy.ts` – refreshes the session on every request and guards protected routes.
+- `supabase/migrations/20261008_profiles_and_avatars.sql` – the `profiles` table, the `on_auth_user_created` trigger, row-level security for profiles, and the public `avatars` Storage bucket with per-user upload rules.
+- Photos are uploaded straight to Storage under `avatars/<user id>/`. Only the public URL is saved in `profiles.avatar_url`; no image bytes go into the database. Uploading a new photo replaces the old one.
+
+## Setup
+
+1. `npm install`
+2. Copy `.env.example` to `.env.local` and fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the anon key, never the service-role key).
+3. Run `supabase/migrations/20261008_profiles_and_avatars.sql` in the Supabase SQL Editor.
+4. Create a Google OAuth client (Web application) in Google Cloud Console with the authorized redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`, then paste its Client ID and Secret into Supabase → Authentication → Sign In / Providers → Google.
+5. In Supabase → Authentication → URL Configuration, allow these redirect URLs:
+   - `http://localhost:3000/auth/callback`
+   - `https://js-humorproject.vercel.app/auth/callback`
+   - `https://js-humorproject-*-jie-yi.vercel.app/auth/callback` (commit-specific deployments)
+6. `npm run dev` and open http://localhost:3000.
 
 ## Checks
 
@@ -18,19 +44,3 @@ Assignment 2 extends the original Next.js Hello World app into a responsive joke
 npm run lint
 npm run build
 ```
-
-For a local production preview, stop the dev server, then run `npm start` after building.
-
-## Verify the live data
-
-- Compare the cards with the rows in Supabase's Table Editor (`public.jokes`). Cards follow ascending IDs.
-- Optionally change a title in Supabase, refresh the homepage, and restore the original title afterward. No code edit or rebuild is needed.
-- `app/page.tsx` is a Server Component: database requests run in the Next.js server, so they will not appear as Supabase requests in browser DevTools. Images are fetched directly from their public Storage URLs.
-- `lib/supabase.ts` performs the actual `.from("jokes").select(...).order("id", { ascending: true })` query with caching disabled. The page uses `connection()` to fetch at request time.
-- Missing configuration, query errors, and an empty table have separate messages. No hardcoded fallback jokes are displayed.
-
-The table must allow `anon` to SELECT through grants and RLS. Public visitors do not need write access. Images must be publicly readable.
-
-## Future Vercel deployment
-
-Set the same two environment variables in the existing Vercel project before redeploying. Local `.env.local` is not uploaded through Git. This integration has not been committed, pushed, or deployed.
