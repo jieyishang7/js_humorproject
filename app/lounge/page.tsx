@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCaptions } from "@/lib/captions";
+import { PhotoUploader } from "@/components/PhotoUploader";
+import { getCaptions, getUploads, type Caption } from "@/lib/captions";
 import { getJokes, type Joke } from "@/lib/jokes";
-import { generateCaption, vote } from "./actions";
+import { generateCaption, generateUploadCaption, vote } from "./actions";
 import { displayName, getCurrentUser, initials, isProfileComplete } from "@/lib/profile";
 
 export const metadata: Metadata = { title: "The Green Room | js_humorproject" };
@@ -27,7 +28,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
     jokes = [];
   }
 
-  const captions = await getCaptions(user.id);
+  const [captions, uploads] = await Promise.all([getCaptions(user.id), getUploads()]);
 
   // Same pick for everyone on a given day.
   const today = new Date();
@@ -96,63 +97,69 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
             {error}
           </p>
         )}
+        <PhotoUploader userId={user.id} />
         <ul className="lab-list">
-          {jokes.map((joke) => {
-            const forJoke = captions.filter((c) => c.joke_id === joke.id);
-            return (
-              <li key={joke.id} id={`joke-${joke.id}`} className="panel lab-item">
-                <div className="joke-image">
-                  <Image src={joke.image_url} alt={joke.title} fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
-                </div>
-                <div className="lab-body">
-                  <h3 className="pick-title">{joke.title}</h3>
-                  <form action={generateCaption}>
-                    <input type="hidden" name="joke_id" value={joke.id} />
-                    <button type="submit" className="btn btn-primary btn-small">
-                      ✨ Generate an AI caption
-                    </button>
-                  </form>
-                  {forJoke.length === 0 ? (
-                    <p className="hint">No captions yet. Be the first.</p>
-                  ) : (
-                    <ol className="caption-list">
-                      {forJoke.map((caption) => (
-                        <li key={caption.id} className="caption-row">
-                          <form action={vote} className="vote-box">
-                            <input type="hidden" name="caption_id" value={caption.id} />
-                            <button
-                              type="submit"
-                              name="value"
-                              value="1"
-                              className="vote-btn"
-                              data-active={caption.myVote === 1}
-                              aria-label="Upvote"
-                            >
-                              ▲
-                            </button>
-                            <span className="vote-score">{caption.score}</span>
-                            <button
-                              type="submit"
-                              name="value"
-                              value="-1"
-                              className="vote-btn"
-                              data-active={caption.myVote === -1}
-                              aria-label="Downvote"
-                            >
-                              ▼
-                            </button>
-                          </form>
-                          <p className="caption-text">{caption.content}</p>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                </div>
-              </li>
-            );
-          })}
+          {uploads.map((upload) => (
+            <li key={`upload-${upload.id}`} id={`upload-${upload.id}`} className="panel lab-item">
+              <div className="joke-image">
+                <Image src={upload.image_url} alt="A member's uploaded photo" fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
+              </div>
+              <div className="lab-body">
+                <h3 className="pick-title">Member upload</h3>
+                <form action={generateUploadCaption}>
+                  <input type="hidden" name="upload_id" value={upload.id} />
+                  <button type="submit" className="btn btn-secondary btn-small">
+                    ✨ Generate another caption
+                  </button>
+                </form>
+                <CaptionList captions={captions.filter((c) => c.upload_id === upload.id)} />
+              </div>
+            </li>
+          ))}
+          {jokes.map((joke) => (
+            <li key={joke.id} id={`joke-${joke.id}`} className="panel lab-item">
+              <div className="joke-image">
+                <Image src={joke.image_url} alt={joke.title} fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
+              </div>
+              <div className="lab-body">
+                <h3 className="pick-title">{joke.title}</h3>
+                <form action={generateCaption}>
+                  <input type="hidden" name="joke_id" value={joke.id} />
+                  <button type="submit" className="btn btn-primary btn-small">
+                    ✨ Generate an AI caption
+                  </button>
+                </form>
+                <CaptionList captions={captions.filter((c) => c.joke_id === joke.id)} />
+              </div>
+            </li>
+          ))}
         </ul>
       </section>
     </main>
+  );
+}
+
+/** AI captions for one image, best first, each with upvote/downvote buttons. */
+function CaptionList({ captions }: { captions: Caption[] }) {
+  if (captions.length === 0) return <p className="hint">No captions yet. Be the first.</p>;
+
+  return (
+    <ol className="caption-list">
+      {captions.map((caption) => (
+        <li key={caption.id} className="caption-row">
+          <form action={vote} className="vote-box">
+            <input type="hidden" name="caption_id" value={caption.id} />
+            <button type="submit" name="value" value="1" className="vote-btn" data-active={caption.myVote === 1} aria-label="Upvote">
+              ▲
+            </button>
+            <span className="vote-score">{caption.score}</span>
+            <button type="submit" name="value" value="-1" className="vote-btn" data-active={caption.myVote === -1} aria-label="Downvote">
+              ▼
+            </button>
+          </form>
+          <p className="caption-text">{caption.content}</p>
+        </li>
+      ))}
+    </ol>
   );
 }

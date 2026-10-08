@@ -887,3 +887,4 @@ img {
 .vote-score { font-weight: 700; }
 .caption-text { margin: 0; }
 @media (max-width: 700px) { .lab-item { grid-template-columns: 1fr; } }
+.photo-uploader { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
