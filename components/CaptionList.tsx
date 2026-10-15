@@ -30,7 +30,7 @@ export function CaptionList({
       {rest.length > 0 && (
         <details className="caption-more">
           <summary>
-            Show {rest.length} more caption{rest.length === 1 ? "" : "s"}
+            Show {rest.length} more spot{rest.length === 1 ? "" : "s"}
           </summary>
           <ol className="caption-list">
             {rest.map((caption) => (
