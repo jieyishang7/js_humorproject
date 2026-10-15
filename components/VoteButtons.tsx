@@ -7,70 +7,64 @@ import { vote } from "@/app/lounge/actions";
 type Props = { captionId: number; score: number; myVote: -1 | 0 | 1; signedIn: boolean };
 
 /**
- * Up/down vote that updates instantly (optimistic) and saves in the background,
- * so the page never reloads or jumps. Signed-out visitors get a sign-in link.
+ * A single heart "like". It updates instantly (optimistic) and saves in the
+ * background; tapping again removes the like. Signed-out visitors see the
+ * count and a sign-in link.
  */
 export function VoteButtons({ captionId, score, myVote, signedIn }: Props) {
   const [pending, startTransition] = useTransition();
-  const [state, setOptimistic] = useOptimistic({ score, myVote }, (current, value: 1 | -1) => {
-    const next = current.myVote === value ? 0 : value; // same button again = undo
-    return { score: current.score - current.myVote + next, myVote: next as -1 | 0 | 1 };
-  });
+  const [state, setOptimistic] = useOptimistic({ score, liked: myVote === 1 }, (current) => ({
+    liked: !current.liked,
+    score: current.score + (current.liked ? -1 : 1),
+  }));
+
+  const heart = (filled: boolean) => (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.4 1.1 5 2.9 1.6-1.8 3-2.9 5-2.9 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 
   if (!signedIn) {
     return (
-      <div className="vote-box vote-box-locked">
-        <span className="vote-score" aria-label={`Score ${score}`}>
-          {score}
-        </span>
-        <Link href="/login" className="vote-signin">
-          Sign in to vote
-        </Link>
-      </div>
+      <Link href="/login" className="like-btn" title="Sign in to like" aria-label={`${score} likes. Sign in to like`}>
+        {heart(false)}
+        <span className="like-count">{score}</span>
+      </Link>
     );
   }
 
-  function cast(value: 1 | -1) {
+  function toggle() {
     startTransition(async () => {
-      setOptimistic(value);
+      setOptimistic(null);
       const data = new FormData();
       data.set("caption_id", String(captionId));
-      data.set("value", String(value));
+      // Liking again sends the same value, which the server treats as "remove".
+      data.set("value", "1");
       await vote(data);
     });
   }
 
   return (
-    <div className="vote-box" aria-busy={pending}>
-      <button
-        type="button"
-        className="vote-btn vote-up"
-        data-active={state.myVote === 1}
-        aria-pressed={state.myVote === 1}
-        aria-label="Funny — upvote"
-        title="Funny"
-        onClick={() => cast(1)}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4 3 15h6v5h6v-5h6z" fill="currentColor" />
-        </svg>
-      </button>
-      <span className="vote-score" aria-live="polite">
+    <button
+      type="button"
+      className="like-btn"
+      data-active={state.liked}
+      aria-pressed={state.liked}
+      aria-busy={pending}
+      aria-label={state.liked ? "Unlike" : "Like"}
+      title={state.liked ? "Unlike" : "Like"}
+      onClick={toggle}
+    >
+      {heart(state.liked)}
+      <span className="like-count" aria-live="polite">
         {state.score}
       </span>
-      <button
-        type="button"
-        className="vote-btn vote-down"
-        data-active={state.myVote === -1}
-        aria-pressed={state.myVote === -1}
-        aria-label="Not funny — downvote"
-        title="Not funny"
-        onClick={() => cast(-1)}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 20 3 9h6V4h6v5h6z" fill="currentColor" />
-        </svg>
-      </button>
-    </div>
+    </button>
   );
 }

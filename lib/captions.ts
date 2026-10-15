@@ -93,3 +93,38 @@ export function parseSpot(content: string): Spot | null {
     return null;
   }
 }
+
+/** Caption ids the user has added to their plan. Empty if signed out or the table is missing. */
+export async function getSavedIds(userId: string | null): Promise<Set<number>> {
+  if (!userId) return new Set();
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("saved_spots").select("caption_id").eq("user_id", userId);
+  if (error) {
+    console.error("Could not load plan:", error.message);
+    return new Set();
+  }
+  return new Set(data.map((row) => row.caption_id as number));
+}
+
+export type PlanItem = { caption_id: number; created_at: string; content: string; mood: string | null };
+
+/** The user's saved spots, newest first, with the mood they came from. */
+export async function getPlan(userId: string): Promise<PlanItem[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("saved_spots")
+    .select("caption_id, created_at, captions(content, spot_requests(mood))")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("Could not load plan:", error.message);
+    return [];
+  }
+  return data.map((row) => {
+    const caption = (Array.isArray(row.captions) ? row.captions[0] : row.captions) as
+      | { content: string; spot_requests: { mood: string } | { mood: string }[] | null }
+      | null;
+    const request = Array.isArray(caption?.spot_requests) ? caption?.spot_requests[0] : caption?.spot_requests;
+    return { caption_id: row.caption_id, created_at: row.created_at, content: caption?.content ?? "", mood: request?.mood ?? null };
+  });
+}

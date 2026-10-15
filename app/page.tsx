@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { MoodForm } from "@/components/MoodForm";
 import { RequestCard } from "@/components/RequestCard";
-import { getCaptions, getSpotRequests } from "@/lib/captions";
+import { getCaptions, getSavedIds, getSpotRequests } from "@/lib/captions";
 import { displayName, getCurrentUser } from "@/lib/profile";
 
 export default async function Home() {
@@ -19,7 +19,11 @@ export default async function Home() {
   const { user, profile } = session;
   const signedIn = Boolean(user);
 
-  const [captions, requests] = await Promise.all([getCaptions(user?.id ?? null), getSpotRequests(6)]);
+  const [captions, requests, savedIds] = await Promise.all([
+    getCaptions(user?.id ?? null),
+    getSpotRequests(6),
+    getSavedIds(user?.id ?? null),
+  ]);
   const spots = captions.filter((c) => c.request_id !== null);
 
   return (
@@ -34,7 +38,7 @@ export default async function Home() {
           <span className="highlight">you go today?</span>
         </h1>
         <p className="hero-intro">
-          Tell the AI your mood. It picks three New York spots. Students vote on which picks are actually worth the
+          Tell the AI your mood. It picks three New York spots. Students like the picks that are actually worth the
           subway ride.
         </p>
       </section>
@@ -82,6 +86,7 @@ export default async function Home() {
                 spots={spots.filter((c) => c.request_id === request.id)}
                 signedIn={signedIn}
                 visible={3}
+                savedIds={savedIds}
               />
             ))}
           </ul>

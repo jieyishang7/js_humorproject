@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { GenerateButton } from "@/components/GenerateButton";
 import { MoodForm } from "@/components/MoodForm";
 import { RequestCard } from "@/components/RequestCard";
-import { getCaptions, getSpotRequests } from "@/lib/captions";
+import { getCaptions, getSavedIds, getSpotRequests } from "@/lib/captions";
 import { getCurrentUser, isProfileComplete } from "@/lib/profile";
 import { suggestAnotherSpot } from "./actions";
 
@@ -20,7 +20,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
   if (!user) redirect("/login");
   if (!isProfileComplete(profile)) redirect("/welcome");
 
-  const [captions, requests] = await Promise.all([getCaptions(user.id), getSpotRequests()]);
+  const [captions, requests, savedIds] = await Promise.all([getCaptions(user.id), getSpotRequests(), getSavedIds(user.id)]);
   const spots = captions.filter((c) => c.request_id !== null);
   const myVotes = spots.filter((c) => c.myVote !== 0).length;
 
@@ -35,7 +35,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
           <br />
           Where to today?
         </h1>
-        <p className="hero-intro">Tell the AI your mood. It picks three NYC spots. Students vote on which picks are actually good.</p>
+        <p className="hero-intro">Tell the AI your mood. It picks three NYC spots. Students like the picks that are actually good.</p>
       </section>
 
       {error && (
@@ -64,8 +64,8 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
         <li>
           <span className="step-num">3</span>
           <div>
-            <strong>Vote</strong>
-            <span>▲ been there, loved it. ▼ skip. Best picks rise to the top.</span>
+            <strong>Like &amp; plan</strong>
+            <span>❤️ the picks you love, ＋ add them to your plan.</span>
           </div>
         </li>
       </ol>
@@ -78,7 +78,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
           <strong>{spots.length}</strong> AI picks
         </span>
         <span>
-          <strong>{myVotes}</strong> voted on by you
+          <strong>{myVotes}</strong> liked by you
         </span>
       </div>
 
@@ -92,6 +92,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
               request={request}
               spots={spots.filter((c) => c.request_id === request.id)}
               signedIn
+              savedIds={savedIds}
               footer={
                 <form action={suggestAnotherSpot}>
                   <input type="hidden" name="request_id" value={request.id} />

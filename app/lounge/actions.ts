@@ -342,3 +342,20 @@ export async function vote(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/lounge");
 }
+
+/** Adds a recommended spot to the signed-in user's plan, or removes it if it's already there. */
+export async function togglePlan(captionId: number, save: boolean) {
+  if (!Number.isInteger(captionId)) return;
+  const { supabase, user } = await requireUser();
+
+  if (save) {
+    const { error } = await supabase.from("saved_spots").upsert({ user_id: user.id, caption_id: captionId });
+    if (error) console.error("Saving to plan failed:", error.message);
+  } else {
+    await supabase.from("saved_spots").delete().eq("user_id", user.id).eq("caption_id", captionId);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/lounge");
+  revalidatePath("/plan");
+}

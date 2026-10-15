@@ -1,7 +1,8 @@
 import { parseSpot, type Caption } from "@/lib/captions";
+import { PlanButton } from "./PlanButton";
 import { VoteButtons } from "./VoteButtons";
 
-type Props = { captions: Caption[]; signedIn: boolean; visible?: number; emptyText?: string };
+type Props = { captions: Caption[]; signedIn: boolean; visible?: number; emptyText?: string; savedIds?: Set<number> };
 
 /**
  * AI captions for one image, best first. The leader gets a "crowd favorite" tag.
@@ -12,6 +13,7 @@ export function CaptionList({
   signedIn,
   visible = 4,
   emptyText = "Nothing here yet.",
+  savedIds = new Set(),
 }: Props) {
   if (captions.length === 0) return <p className="caption-empty">{emptyText}</p>;
 
@@ -22,7 +24,7 @@ export function CaptionList({
     <div className="caption-stack">
       <ol className="caption-list">
         {top.map((caption, index) => (
-          <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={index === 0 && caption.score > 0} />
+          <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={index === 0 && caption.score > 0} saved={savedIds.has(caption.id)} />
         ))}
       </ol>
       {rest.length > 0 && (
@@ -32,7 +34,7 @@ export function CaptionList({
           </summary>
           <ol className="caption-list">
             {rest.map((caption) => (
-              <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={false} />
+              <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={false} saved={savedIds.has(caption.id)} />
             ))}
           </ol>
         </details>
@@ -41,20 +43,25 @@ export function CaptionList({
   );
 }
 
-function CaptionRow({ caption, signedIn, leader }: { caption: Caption; signedIn: boolean; leader: boolean }) {
+function CaptionRow(props: { caption: Caption; signedIn: boolean; leader: boolean; saved: boolean }) {
+  const { caption, signedIn, leader, saved } = props;
+  const isSpot = caption.request_id !== null;
   return (
     <li className="caption-row" data-leader={leader}>
-      <VoteButtons captionId={caption.id} score={caption.score} myVote={caption.myVote} signedIn={signedIn} />
       <div className="caption-body">
         {leader && <span className="leader-tag">👑 Crowd favorite</span>}
         <CaptionContent content={caption.content} />
+        <div className="caption-actions">
+          <VoteButtons captionId={caption.id} score={caption.score} myVote={caption.myVote} signedIn={signedIn} />
+          {isSpot && <PlanButton captionId={caption.id} saved={saved} signedIn={signedIn} />}
+        </div>
       </div>
     </li>
   );
 }
 
 /** Place recommendations render as name + neighborhood + reason; anything else as plain text. */
-function CaptionContent({ content }: { content: string }) {
+export function CaptionContent({ content }: { content: string }) {
   const spot = parseSpot(content);
   if (!spot) return <p className="caption-text">{content}</p>;
 

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Pages that require a signed-in user. Anyone else is sent to /login.
-const PROTECTED_PATHS = ["/lounge", "/profile", "/welcome"];
+const PROTECTED_PATHS = ["/lounge", "/profile", "/welcome", "/plan"];
 
 /**
  * Next.js 16 "proxy" (formerly middleware). It runs before every page and:

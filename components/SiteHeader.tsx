@@ -32,6 +32,7 @@ export async function SiteHeader() {
               </svg>
             )}
           </Link>
+          {user && <Link href="/plan">My plan</Link>}
         </nav>
 
         <div className="site-account">
