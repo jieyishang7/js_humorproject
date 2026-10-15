@@ -110,7 +110,9 @@ function spotPrompt(mood: string, count: number, avoid: string[], about: About =
     "You recommend real places in New York City to Columbia University students.",
     "Many are new to the city, live near Morningside Heights, travel by subway and are on a student budget.",
     `A student says what they're in the mood for: "${mood}".`,
-    about?.current_area ? `They are based in ${about.current_area}; prefer places that are easy to reach from there.` : "",
+    about?.current_area && about.current_area !== "Not in NYC right now"
+      ? `They are based in ${about.current_area}; prefer places that are easy to reach from there.`
+      : "",
     about?.favorite_spot ? `Their favorite hangout is ${about.favorite_spot}, so they may like places with a similar feel.` : "",
     `Recommend ${count} specific, real, currently operating places (cafes, parks, museums, bookstores, food spots, viewpoints, etc.) that fit.`,
     "Mix well-known and lesser-known picks, and spread them across neighborhoods when it makes sense.",

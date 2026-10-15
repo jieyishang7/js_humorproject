@@ -16,6 +16,25 @@ type Props = { from: "welcome" | "profile"; defaults: Defaults; submitLabel: str
 
 const initialState: ProfileFormState = { status: "idle" };
 
+const AREAS = [
+  "Morningside Heights",
+  "Upper West Side",
+  "Upper East Side",
+  "Harlem",
+  "Midtown",
+  "Chelsea",
+  "Greenwich Village",
+  "East Village",
+  "Lower East Side",
+  "SoHo",
+  "Financial District",
+  "Brooklyn (Williamsburg, Bushwick…)",
+  "Brooklyn (Park Slope, Downtown…)",
+  "Queens (Astoria, LIC…)",
+  "The Bronx",
+  "Not in NYC right now",
+];
+
 export function ProfileForm({ from, defaults, submitLabel }: Props) {
   const [state, formAction, pending] = useActionState(saveProfile, initialState);
   const errors = state.fieldErrors ?? {};
@@ -60,14 +79,22 @@ export function ProfileForm({ from, defaults, submitLabel }: Props) {
 
       <div className="field-row">
         <label className="field">
-          <span className="field-label">📍 Where are you based right now?</span>
-          <input
+          <span className="field-label">📍 Which part of NYC are you in?</span>
+          <select
             name="current_area"
             defaultValue={defaults.current_area ?? ""}
-            maxLength={80}
             aria-invalid={Boolean(errors.current_area)}
-            placeholder="Morningside Heights"
-          />
+          >
+            <option value="">Choose an area…</option>
+            {AREAS.map((area) => (
+              <option key={area} value={area}>
+                {area}
+              </option>
+            ))}
+            {defaults.current_area && !AREAS.includes(defaults.current_area) && (
+              <option value={defaults.current_area}>{defaults.current_area}</option>
+            )}
+          </select>
           {errors.current_area && <span className="field-error">{errors.current_area}</span>}
         </label>
 
