@@ -39,6 +39,9 @@ export default async function ProfilePage() {
               first_name: profile?.first_name ?? null,
               last_name: profile?.last_name ?? null,
               tagline: profile?.tagline ?? null,
+              current_area: profile?.current_area ?? null,
+              cities_visited: profile?.cities_visited ?? null,
+              favorite_spot: profile?.favorite_spot ?? null,
             }}
             submitLabel="Save changes"
           />

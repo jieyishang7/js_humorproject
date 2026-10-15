@@ -103,11 +103,15 @@ function geminiKey(): string {
 
 type Spot = { name: string; area: string; why: string; price?: string };
 
-function spotPrompt(mood: string, count: number, avoid: string[]) {
+type About = { current_area: string | null; favorite_spot: string | null } | null;
+
+function spotPrompt(mood: string, count: number, avoid: string[], about: About = null) {
   return [
     "You recommend real places in New York City to Columbia University students.",
     "Many are new to the city, live near Morningside Heights, travel by subway and are on a student budget.",
     `A student says what they're in the mood for: "${mood}".`,
+    about?.current_area ? `They are based in ${about.current_area}; prefer places that are easy to reach from there.` : "",
+    about?.favorite_spot ? `Their favorite hangout is ${about.favorite_spot}, so they may like places with a similar feel.` : "",
     `Recommend ${count} specific, real, currently operating places (cafes, parks, museums, bookstores, food spots, viewpoints, etc.) that fit.`,
     "Mix well-known and lesser-known picks, and spread them across neighborhoods when it makes sense.",
     avoid.length ? `Do not repeat any of these: ${avoid.join("; ")}.` : "",
@@ -133,10 +137,22 @@ function parseSpots(text: string): Spot[] {
   }
 }
 
-async function recommendSpots(mood: string, count: number, avoid: string[]) {
-  const answer = await askGemini(geminiKey(), [{ text: spotPrompt(mood, count, avoid) }], true);
+async function recommendSpots(mood: string, count: number, avoid: string[], about: About = null) {
+  const prompt = spotPrompt(mood, count, avoid, about);
+  const answer = await askGemini(geminiKey(), [{ text: prompt }], true);
   if (!answer) return null;
-  return { spots: parseSpots(answer.text).slice(0, count), model: answer.model, prompt: spotPrompt(mood, count, avoid) };
+  return { spots: parseSpots(answer.text).slice(0, count), model: answer.model, prompt };
+}
+
+/** The signed-in user's location and favorite spot, if they filled them in. */
+async function getAbout(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<About> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("current_area, favorite_spot")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) return null; // e.g. columns not added yet
+  return data;
 }
 
 /** Saves a mood, asks the AI for 3 places, and stores each one so it can be voted on. */
@@ -147,7 +163,7 @@ export async function createSpotRequest(formData: FormData) {
 
   const { supabase, user } = await requireUser();
 
-  const result = await recommendSpots(mood, 3, []);
+  const result = await recommendSpots(mood, 3, [], await getAbout(supabase, user.id));
   if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
 
   const { data: request, error } = await supabase
@@ -187,7 +203,7 @@ export async function suggestAnotherSpot(formData: FormData) {
   const { data: existing } = await supabase.from("captions").select("content").eq("request_id", request.id);
   const avoid = (existing ?? []).flatMap((row) => parseSpots(row.content).map((s) => s.name));
 
-  const result = await recommendSpots(request.mood, 1, avoid);
+  const result = await recommendSpots(request.mood, 1, avoid, await getAbout(supabase, user.id));
   if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
 
   await supabase.from("captions").insert({

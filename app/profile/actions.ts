@@ -7,21 +7,27 @@ import { createClient } from "@/lib/supabase/server";
 export type ProfileFormState = {
   status: "idle" | "saved" | "error";
   message?: string;
-  fieldErrors?: Partial<Record<"first_name" | "last_name" | "tagline", string>>;
+  fieldErrors?: Partial<Record<"first_name" | "last_name" | "tagline" | "current_area" | "cities_visited" | "favorite_spot", string>>;
 };
 
 const MAX_NAME = 50;
 const MAX_TAGLINE = 120;
+const MAX_AREA = 80;
+const MAX_CITIES = 200;
+const MAX_SPOT = 120;
 
 function clean(value: FormDataEntryValue | null): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** Saves first name, last name and tagline for the signed-in user. */
+/** Saves the signed-in user's profile details. */
 export async function saveProfile(_prev: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
   const firstName = clean(formData.get("first_name"));
   const lastName = clean(formData.get("last_name"));
   const tagline = clean(formData.get("tagline"));
+  const currentArea = clean(formData.get("current_area"));
+  const citiesVisited = clean(formData.get("cities_visited"));
+  const favoriteSpot = clean(formData.get("favorite_spot"));
   const from = clean(formData.get("from"));
 
   const fieldErrors: ProfileFormState["fieldErrors"] = {};
@@ -30,6 +36,9 @@ export async function saveProfile(_prev: ProfileFormState, formData: FormData): 
   if (!lastName) fieldErrors.last_name = "Please add your last name.";
   else if (lastName.length > MAX_NAME) fieldErrors.last_name = `Keep it under ${MAX_NAME} characters.`;
   if (tagline.length > MAX_TAGLINE) fieldErrors.tagline = `Keep it under ${MAX_TAGLINE} characters.`;
+  if (currentArea.length > MAX_AREA) fieldErrors.current_area = `Keep it under ${MAX_AREA} characters.`;
+  if (citiesVisited.length > MAX_CITIES) fieldErrors.cities_visited = `Keep it under ${MAX_CITIES} characters.`;
+  if (favoriteSpot.length > MAX_SPOT) fieldErrors.favorite_spot = `Keep it under ${MAX_SPOT} characters.`;
 
   if (Object.keys(fieldErrors).length > 0) {
     return { status: "error", message: "A couple of things need fixing.", fieldErrors };
@@ -47,6 +56,9 @@ export async function saveProfile(_prev: ProfileFormState, formData: FormData): 
       first_name: firstName,
       last_name: lastName,
       tagline: tagline || null,
+      current_area: currentArea || null,
+      cities_visited: citiesVisited || null,
+      favorite_spot: favoriteSpot || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", user.id);

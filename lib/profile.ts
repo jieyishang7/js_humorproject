@@ -8,12 +8,16 @@ export type Profile = {
   first_name: string | null;
   last_name: string | null;
   tagline: string | null;
+  current_area: string | null;
+  cities_visited: string | null;
+  favorite_spot: string | null;
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export const PROFILE_COLUMNS = "id, email, first_name, last_name, tagline, avatar_url, created_at, updated_at";
+export const PROFILE_COLUMNS =
+  "id, email, first_name, last_name, tagline, current_area, cities_visited, favorite_spot, avatar_url, created_at, updated_at";
 
 export function isProfileComplete(profile: Pick<Profile, "first_name" | "last_name"> | null): boolean {
   return Boolean(profile?.first_name?.trim() && profile?.last_name?.trim());

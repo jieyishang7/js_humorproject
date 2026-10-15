@@ -3,11 +3,16 @@
 import { useActionState } from "react";
 import { saveProfile, type ProfileFormState } from "@/app/profile/actions";
 
-type Props = {
-  from: "welcome" | "profile";
-  defaults: { first_name: string | null; last_name: string | null; tagline: string | null };
-  submitLabel: string;
+type Defaults = {
+  first_name: string | null;
+  last_name: string | null;
+  tagline: string | null;
+  current_area: string | null;
+  cities_visited: string | null;
+  favorite_spot: string | null;
 };
+
+type Props = { from: "welcome" | "profile"; defaults: Defaults; submitLabel: string };
 
 const initialState: ProfileFormState = { status: "idle" };
 
@@ -49,16 +54,57 @@ export function ProfileForm({ from, defaults, submitLabel }: Props) {
         </label>
       </div>
 
+      <p className="form-group-title">
+        About you <span>Optional · helps the AI pick better spots for you</span>
+      </p>
+
+      <div className="field-row">
+        <label className="field">
+          <span className="field-label">📍 Where are you based right now?</span>
+          <input
+            name="current_area"
+            defaultValue={defaults.current_area ?? ""}
+            maxLength={80}
+            aria-invalid={Boolean(errors.current_area)}
+            placeholder="Morningside Heights"
+          />
+          {errors.current_area && <span className="field-error">{errors.current_area}</span>}
+        </label>
+
+        <label className="field">
+          <span className="field-label">☕ Your favorite third place</span>
+          <input
+            name="favorite_spot"
+            defaultValue={defaults.favorite_spot ?? ""}
+            maxLength={120}
+            aria-invalid={Boolean(errors.favorite_spot)}
+            placeholder="Hungarian Pastry Shop"
+          />
+          {errors.favorite_spot && <span className="field-error">{errors.favorite_spot}</span>}
+        </label>
+      </div>
+
       <label className="field">
-        <span className="field-label">
-          Your humor in one line <em>optional</em>
-        </span>
+        <span className="field-label">🌍 Cities you&apos;ve been to</span>
+        <input
+          name="cities_visited"
+          defaultValue={defaults.cities_visited ?? ""}
+          maxLength={200}
+          aria-invalid={Boolean(errors.cities_visited)}
+          placeholder="Chicago, Tokyo, Paris"
+        />
+        <span className="field-hint">Separate with commas.</span>
+        {errors.cities_visited && <span className="field-error">{errors.cities_visited}</span>}
+      </label>
+
+      <label className="field">
+        <span className="field-label">✨ Your vibe in one line</span>
         <input
           name="tagline"
           defaultValue={defaults.tagline ?? ""}
           maxLength={120}
           aria-invalid={Boolean(errors.tagline)}
-          placeholder="Laughs first, debugs later."
+          placeholder="Bookstores by day, rooftops by night."
         />
         {errors.tagline && <span className="field-error">{errors.tagline}</span>}
       </label>

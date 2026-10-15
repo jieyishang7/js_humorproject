@@ -1937,3 +1937,28 @@ body {
     padding: 20px;
   }
 }
+
+/* richer profile form */
+.form-group-title {
+  margin: 10px 0 -4px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(22, 23, 29, 0.07);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.form-group-title span {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.field-hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.welcome-avatar {
+  margin-bottom: 24px;
+}
