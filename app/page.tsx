@@ -41,6 +41,25 @@ export default async function Home() {
           Tell the AI your mood. It picks three New York spots. Students like the picks that are actually worth the
           subway ride.
         </p>
+        <ul className="area-tiles" aria-label="Popular areas">
+          {[
+            ["🗽", "Midtown"],
+            ["🌳", "Central Park"],
+            ["📚", "Morningside"],
+            ["🎨", "Chelsea"],
+            ["🍜", "East Village"],
+            ["🌉", "Brooklyn"],
+          ].map(([icon, name]) => (
+            <li key={name}>
+              <Link href={signedIn ? "/lounge" : "/login"} className="area-tile">
+                <span className="area-icon" aria-hidden="true">
+                  {icon}
+                </span>
+                {name}
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
       {/* Gated UI: signed-in members ask right here; visitors are invited to sign in. */}
