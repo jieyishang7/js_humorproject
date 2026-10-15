@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { MoodForm } from "@/components/MoodForm";
 import { RequestCard } from "@/components/RequestCard";
+import { Skyline } from "@/components/Skyline";
 import { getCaptions, getSavedIds, getSpotRequests } from "@/lib/captions";
 import { displayName, getCurrentUser } from "@/lib/profile";
 
@@ -41,6 +42,7 @@ export default async function Home() {
           Tell the AI your mood. It picks three New York spots. Students like the picks that are actually worth the
           subway ride.
         </p>
+        <Skyline />
       </section>
 
       {/* Gated UI: signed-in members ask right here; visitors are invited to sign in. */}
