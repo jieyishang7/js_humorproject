@@ -351,8 +351,9 @@ export async function togglePlan(captionId: number, save: boolean) {
   const { supabase, user } = await requireUser();
 
   if (save) {
-    const { error } = await supabase.from("saved_spots").upsert({ user_id: user.id, caption_id: captionId });
-    if (error) console.error("Saving to plan failed:", error.message);
+    // Plain insert (no upsert: that would need UPDATE rights). Already saved = fine.
+    const { error } = await supabase.from("saved_spots").insert({ user_id: user.id, caption_id: captionId });
+    if (error && error.code !== "23505") console.error("Saving to plan failed:", error.message);
   } else {
     await supabase.from("saved_spots").delete().eq("user_id", user.id).eq("caption_id", captionId);
   }

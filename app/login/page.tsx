@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
-export const metadata: Metadata = { title: "Sign in | js_humorproject" };
+export const metadata: Metadata = { title: "Sign in | Spot Finder NYC" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
@@ -11,11 +11,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <main className="page page-narrow">
       <section className="panel login-panel">
         <span className="sticker" aria-hidden="true">
-          backstage pass
+          Spot Finder NYC
         </span>
-        <h1 className="panel-title">Sign in to the Humor Project</h1>
+        <h1 className="panel-title">Find your next favorite spot</h1>
         <p className="panel-intro">
-          Use your Google account. New here? Signing in for the first time creates your profile automatically.
+          Sign in with Google to get AI picks for your mood, like the best ones, and save spots to your plan. New here? Your profile is created automatically.
         </p>
 
         {error && (
@@ -27,7 +27,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <GoogleSignInButton />
 
         <p className="fine-print">
-          We only use your name, email and the photo you choose. <Link href="/">Back to the gallery</Link>
+          We only use your name, email and the details you choose to share. <Link href="/">Back to home</Link>
         </p>
       </section>
     </main>
