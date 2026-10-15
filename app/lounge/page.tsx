@@ -33,7 +33,7 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
         <h1 className="hero-title">
           Hey, <span className="highlight">{profile?.first_name}</span>.
           <br />
-          Where to today?
+          Where are you going today?
         </h1>
         <p className="hero-intro">Tell the AI your mood. It picks three NYC spots. Students like the picks that are actually good.</p>
       </section>
