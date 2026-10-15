@@ -49,9 +49,7 @@ function captionPrompt(subject: string) {
  * retired (404) or has no quota (429). Returns the caption and the model used.
  */
 async function writeCaption(prompt: string, imageUrl: string): Promise<{ content: string; model: string } | null> {
-  // The Vercel project stores the key as `geminiapikey`; GEMINI_API_KEY also works locally.
-  const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
-  if (!apiKey) redirect("/lounge?error=AI+generation+is+not+configured+yet+(missing+Gemini+API+key).");
+  const apiKey = geminiKey();
 
   const parts: object[] = [{ text: prompt }];
   try {
@@ -64,20 +62,145 @@ async function writeCaption(prompt: string, imageUrl: string): Promise<{ content
     // Fall back to captioning from the text alone.
   }
 
+  const answer = await askGemini(apiKey, parts);
+  return answer ? { content: answer.text.slice(0, 300), model: answer.model } : null;
+}
+
+/**
+ * Calls Gemini, trying the next model when one is retired (404) or has no
+ * quota (429). With `json`, asks for a JSON-only reply.
+ */
+async function askGemini(apiKey: string, parts: object[], json = false): Promise<{ text: string; model: string } | null> {
   for (const model of await candidateModels(apiKey)) {
     const response = await fetch(`${GEMINI_API}/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({ contents: [{ parts }] }),
+      body: JSON.stringify({
+        contents: [{ parts }],
+        ...(json ? { generationConfig: { responseMimeType: "application/json" } } : {}),
+      }),
     });
     const result = await response.json().catch(() => null);
-    const content: string | undefined = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (response.ok && content) return { content: content.slice(0, 300), model };
+    const text: string | undefined = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (response.ok && text) return { text, model };
 
     console.error("Gemini request failed:", model, response.status, result?.error?.message);
     if (response.status !== 404 && response.status !== 429) break;
   }
   return null;
+}
+
+function geminiKey(): string {
+  // The Vercel project stores the key as `geminiapikey`; GEMINI_API_KEY also works locally.
+  const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
+  if (!apiKey) redirect("/lounge?error=AI+generation+is+not+configured+yet+(missing+Gemini+API+key).");
+  return apiKey;
+}
+
+/* ------------------------------------------------------------------ */
+/* Spot Finder NYC: mood in, AI place recommendations out, members vote. */
+/* ------------------------------------------------------------------ */
+
+type Spot = { name: string; area: string; why: string; price?: string };
+
+function spotPrompt(mood: string, count: number, avoid: string[]) {
+  return [
+    "You recommend real places in New York City to Columbia University students.",
+    "Many are new to the city, live near Morningside Heights, travel by subway and are on a student budget.",
+    `A student says what they're in the mood for: "${mood}".`,
+    `Recommend ${count} specific, real, currently operating places (cafes, parks, museums, bookstores, food spots, viewpoints, etc.) that fit.`,
+    "Mix well-known and lesser-known picks, and spread them across neighborhoods when it makes sense.",
+    avoid.length ? `Do not repeat any of these: ${avoid.join("; ")}.` : "",
+    'Reply with JSON only: an array of objects with keys "name" (place name), "area" (neighborhood),',
+    '"why" (one punchy sentence, max 25 words, on why it fits this mood) and "price" (one of "Free", "$", "$$", "$$$").',
+  ].join(" ");
+}
+
+function parseSpots(text: string): Spot[] {
+  try {
+    const data = JSON.parse(text.replace(/^```(?:json)?|```$/g, "").trim());
+    const list = Array.isArray(data) ? data : [data];
+    return list
+      .filter((s) => s && typeof s.name === "string" && typeof s.why === "string")
+      .map((s) => ({
+        name: String(s.name).slice(0, 80),
+        area: String(s.area ?? "").slice(0, 60),
+        why: String(s.why).slice(0, 220),
+        price: typeof s.price === "string" ? s.price.slice(0, 6) : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function recommendSpots(mood: string, count: number, avoid: string[]) {
+  const answer = await askGemini(geminiKey(), [{ text: spotPrompt(mood, count, avoid) }], true);
+  if (!answer) return null;
+  return { spots: parseSpots(answer.text).slice(0, count), model: answer.model, prompt: spotPrompt(mood, count, avoid) };
+}
+
+/** Saves a mood, asks the AI for 3 places, and stores each one so it can be voted on. */
+export async function createSpotRequest(formData: FormData) {
+  const mood = String(formData.get("mood") ?? "").trim().replace(/\s+/g, " ");
+  if (mood.length < 3) redirect("/lounge?error=Tell+us+a+little+more+about+your+mood+(at+least+3+characters).");
+  if (mood.length > 200) redirect("/lounge?error=Keep+it+under+200+characters.");
+
+  const { supabase, user } = await requireUser();
+
+  const result = await recommendSpots(mood, 3, []);
+  if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
+
+  const { data: request, error } = await supabase
+    .from("spot_requests")
+    .insert({ author_id: user.id, mood })
+    .select("id")
+    .single();
+  if (error || !request) {
+    console.error("Saving spot request failed:", error?.message);
+    redirect("/lounge?error=Couldn't+save+your+request.");
+  }
+
+  const { error: spotsError } = await supabase.from("captions").insert(
+    result.spots.map((spot) => ({
+      request_id: request.id,
+      author_id: user.id,
+      prompt: result.prompt,
+      model: result.model,
+      content: JSON.stringify(spot),
+    })),
+  );
+  if (spotsError) console.error("Saving spots failed:", spotsError.message);
+
+  revalidatePath("/");
+  revalidatePath("/lounge");
+  redirect(`/lounge#request-${request.id}`);
+}
+
+/** Asks the AI for one more place for an existing mood, avoiding places already suggested. */
+export async function suggestAnotherSpot(formData: FormData) {
+  const requestId = Number(formData.get("request_id"));
+  const { supabase, user } = await requireUser();
+
+  const { data: request } = await supabase.from("spot_requests").select("id, mood").eq("id", requestId).maybeSingle();
+  if (!request) redirect("/lounge?error=That+request+no+longer+exists.");
+
+  const { data: existing } = await supabase.from("captions").select("content").eq("request_id", request.id);
+  const avoid = (existing ?? []).flatMap((row) => parseSpots(row.content).map((s) => s.name));
+
+  const result = await recommendSpots(request.mood, 1, avoid);
+  if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
+
+  await supabase.from("captions").insert({
+    request_id: request.id,
+    author_id: user.id,
+    prompt: result.prompt,
+    model: result.model,
+    content: JSON.stringify(result.spots[0]),
+  });
+
+  revalidatePath("/");
+  revalidatePath("/lounge");
+  redirect(`/lounge#request-${request.id}`);
 }
 
 async function requireUser() {
@@ -109,6 +232,7 @@ export async function generateCaption(formData: FormData) {
     redirect("/lounge?error=Couldn't+save+the+caption.");
   }
 
+  revalidatePath("/");
   revalidatePath("/lounge");
   redirect(`/lounge#joke-${joke.id}`);
 }
@@ -146,6 +270,7 @@ export async function captionUpload(path: string): Promise<{ ok: boolean; messag
     if (error) console.error("Saving caption failed:", error.message);
   }
 
+  revalidatePath("/");
   revalidatePath("/lounge");
   return caption
     ? { ok: true }
@@ -168,6 +293,7 @@ export async function generateUploadCaption(formData: FormData) {
     .from("captions")
     .insert({ upload_id: upload.id, author_id: user.id, prompt, model: caption.model, content: caption.content });
 
+  revalidatePath("/");
   revalidatePath("/lounge");
   redirect(`/lounge#upload-${upload.id}`);
 }
@@ -196,5 +322,7 @@ export async function vote(formData: FormData) {
     if (error) console.error("Vote failed:", error.message);
   }
 
+  // Votes show on both the homepage and the members page.
+  revalidatePath("/");
   revalidatePath("/lounge");
 }

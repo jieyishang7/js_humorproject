@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { PhotoUploader } from "@/components/PhotoUploader";
-import { getCaptions, getUploads, type Caption } from "@/lib/captions";
-import { getJokes, type Joke } from "@/lib/jokes";
-import { generateCaption, generateUploadCaption, vote } from "./actions";
-import { displayName, getCurrentUser, initials, isProfileComplete } from "@/lib/profile";
+import { GenerateButton } from "@/components/GenerateButton";
+import { MoodForm } from "@/components/MoodForm";
+import { RequestCard } from "@/components/RequestCard";
+import { getCaptions, getSpotRequests } from "@/lib/captions";
+import { getCurrentUser, isProfileComplete } from "@/lib/profile";
+import { suggestAnotherSpot } from "./actions";
 
-export const metadata: Metadata = { title: "The Green Room | js_humorproject" };
+export const metadata: Metadata = { title: "Find a spot | Spot Finder NYC" };
 
 /**
  * Members-only route. proxy.ts already sends signed-out visitors to /login;
@@ -21,145 +20,88 @@ export default async function LoungePage({ searchParams }: { searchParams: Promi
   if (!user) redirect("/login");
   if (!isProfileComplete(profile)) redirect("/welcome");
 
-  let jokes: Joke[] = [];
-  try {
-    jokes = await getJokes();
-  } catch {
-    jokes = [];
-  }
-
-  const [captions, uploads] = await Promise.all([getCaptions(user.id), getUploads()]);
-
-  // Same pick for everyone on a given day.
-  const today = new Date();
-  const dayNumber = Math.floor(today.getTime() / 86_400_000);
-  const pick = jokes.length > 0 ? jokes[dayNumber % jokes.length] : null;
-  const dateLabel = today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const badgeNumber = user.id.replace(/-/g, "").slice(0, 6).toUpperCase();
+  const [captions, requests] = await Promise.all([getCaptions(user.id), getSpotRequests()]);
+  const spots = captions.filter((c) => c.request_id !== null);
+  const myVotes = spots.filter((c) => c.myVote !== 0).length;
 
   return (
     <main className="page">
       <section className="hero hero-compact">
         <p className="kicker">
-          <span className="kicker-dot kicker-dot-green" aria-hidden="true" /> The Green Room · members only
+          <span className="kicker-dot kicker-dot-green" aria-hidden="true" /> Spot Finder · members
         </p>
         <h1 className="hero-title">
           Hey, <span className="highlight">{profile?.first_name}</span>.
+          <br />
+          Where to today?
         </h1>
-        <p className="hero-intro">You made it backstage. Only signed-in members can see this page.</p>
+        <p className="hero-intro">Tell the AI your mood. It picks three NYC spots. Students vote on which picks are actually good.</p>
       </section>
 
-      <div className="lounge-grid">
-        <article className="badge-card" aria-label="Your member badge">
-          <div className="badge-top">
-            <span>Humor Project</span>
-            <span>Member</span>
-          </div>
-          <div className="avatar avatar-lg">
-            {profile?.avatar_url ? (
-              <Image src={profile.avatar_url} alt={displayName(profile, user)} fill unoptimized sizes="120px" />
-            ) : (
-              <span>{initials(profile, user)}</span>
-            )}
-          </div>
-          <h2 className="badge-name">{displayName(profile, user)}</h2>
-          <p className="badge-tagline">{profile?.tagline || "No tagline yet. Mysterious."}</p>
-          <div className="badge-bottom">
-            <span>No. {badgeNumber}</span>
-            <Link href="/profile">Edit profile →</Link>
-          </div>
-          {!profile?.avatar_url && (
-            <p className="badge-nudge">
-              <Link href="/profile">Add a photo</Link> to finish your badge.
-            </p>
-          )}
-        </article>
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
 
-        <article className="panel pick-card">
-          <p className="section-label">Pick of the day · {dateLabel}</p>
-          {pick ? (
-            <>
-              <div className="joke-image joke-image-large">
-                <Image src={pick.image_url} alt={pick.title} fill unoptimized sizes="(max-width: 900px) 100vw, 60vw" />
-              </div>
-              <h2 className="pick-title">{pick.title}</h2>
-            </>
-          ) : (
-            <p className="notice">No jokes to pick from yet.</p>
-          )}
-        </article>
+      <MoodForm />
+
+      <ol className="steps" aria-label="How it works">
+        <li>
+          <span className="step-num">1</span>
+          <div>
+            <strong>Describe your mood</strong>
+            <span>Budget, vibe, who you&apos;re with. Or tap an idea.</span>
+          </div>
+        </li>
+        <li>
+          <span className="step-num">2</span>
+          <div>
+            <strong>AI picks 3 spots</strong>
+            <span>Real places, with the neighborhood and why it fits.</span>
+          </div>
+        </li>
+        <li>
+          <span className="step-num">3</span>
+          <div>
+            <strong>Vote</strong>
+            <span>▲ been there, loved it. ▼ skip. Best picks rise to the top.</span>
+          </div>
+        </li>
+      </ol>
+
+      <div className="lab-stats" aria-label="Activity">
+        <span>
+          <strong>{requests.length}</strong> moods
+        </span>
+        <span>
+          <strong>{spots.length}</strong> AI picks
+        </span>
+        <span>
+          <strong>{myVotes}</strong> voted on by you
+        </span>
       </div>
 
-      <section className="backstage caption-lab" aria-labelledby="lab-title">
-        <h2 id="lab-title" className="section-label">Caption Lab · AI writes, you judge</h2>
-        {error && (
-          <p className="notice notice-error" role="alert">
-            {error}
-          </p>
-        )}
-        <PhotoUploader userId={user.id} />
+      {requests.length === 0 ? (
+        <p className="caption-empty">No requests yet. Be the first: tell the AI what you&apos;re in the mood for.</p>
+      ) : (
         <ul className="lab-list">
-          {uploads.map((upload) => (
-            <li key={`upload-${upload.id}`} id={`upload-${upload.id}`} className="panel lab-item">
-              <div className="joke-image">
-                <Image src={upload.image_url} alt="A member's uploaded photo" fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
-              </div>
-              <div className="lab-body">
-                <h3 className="pick-title">Member upload</h3>
-                <form action={generateUploadCaption}>
-                  <input type="hidden" name="upload_id" value={upload.id} />
-                  <button type="submit" className="btn btn-secondary btn-small">
-                    ✨ Generate another caption
-                  </button>
+          {requests.map((request) => (
+            <RequestCard
+              key={request.id}
+              request={request}
+              spots={spots.filter((c) => c.request_id === request.id)}
+              signedIn
+              footer={
+                <form action={suggestAnotherSpot}>
+                  <input type="hidden" name="request_id" value={request.id} />
+                  <GenerateButton label="✨ Suggest another spot" variant="secondary" />
                 </form>
-                <CaptionList captions={captions.filter((c) => c.upload_id === upload.id)} />
-              </div>
-            </li>
-          ))}
-          {jokes.map((joke) => (
-            <li key={joke.id} id={`joke-${joke.id}`} className="panel lab-item">
-              <div className="joke-image">
-                <Image src={joke.image_url} alt={joke.title} fill unoptimized sizes="(max-width: 900px) 100vw, 40vw" />
-              </div>
-              <div className="lab-body">
-                <h3 className="pick-title">{joke.title}</h3>
-                <form action={generateCaption}>
-                  <input type="hidden" name="joke_id" value={joke.id} />
-                  <button type="submit" className="btn btn-primary btn-small">
-                    ✨ Generate an AI caption
-                  </button>
-                </form>
-                <CaptionList captions={captions.filter((c) => c.joke_id === joke.id)} />
-              </div>
-            </li>
+              }
+            />
           ))}
         </ul>
-      </section>
+      )}
     </main>
-  );
-}
-
-/** AI captions for one image, best first, each with upvote/downvote buttons. */
-function CaptionList({ captions }: { captions: Caption[] }) {
-  if (captions.length === 0) return <p className="hint">No captions yet. Be the first.</p>;
-
-  return (
-    <ol className="caption-list">
-      {captions.map((caption) => (
-        <li key={caption.id} className="caption-row">
-          <form action={vote} className="vote-box">
-            <input type="hidden" name="caption_id" value={caption.id} />
-            <button type="submit" name="value" value="1" className="vote-btn" data-active={caption.myVote === 1} aria-label="Upvote">
-              ▲
-            </button>
-            <span className="vote-score">{caption.score}</span>
-            <button type="submit" name="value" value="-1" className="vote-btn" data-active={caption.myVote === -1} aria-label="Downvote">
-              ▼
-            </button>
-          </form>
-          <p className="caption-text">{caption.content}</p>
-        </li>
-      ))}
-    </ol>
   );
 }

@@ -7,8 +7,8 @@ const display = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-disp
 const mono = Space_Mono({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "Joke Gallery | js_humorproject",
-  description: "A joke gallery for The Humor Project, powered by Supabase, with Google sign-in and member profiles.",
+  title: "Spot Finder NYC",
+  description: "Tell the AI your mood, get three New York spots, and vote on the best picks.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -18,8 +18,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <SiteHeader />
         {children}
         <footer className="site-footer">
-          <span>The Humor Project · Assignment 03</span>
-          <span>Small moments. Shared laughs.</span>
+          <span>Spot Finder NYC · The Humor Project</span>
+          <span>AI picks. Student votes.</span>
         </footer>
       </body>
     </html>

@@ -14,17 +14,17 @@ export async function SiteHeader() {
   return (
     <header className="site-header">
       <div className="site-header-inner">
-        <Link href="/" className="logo" aria-label="js_humorproject home">
+        <Link href="/" className="logo" aria-label="Spot Finder NYC home">
           <span className="logo-mark" aria-hidden="true">
-            ha
+            sf
           </span>
-          <span className="logo-text">js_humorproject</span>
+          <span className="logo-text">Spot Finder NYC</span>
         </Link>
 
         <nav className="site-nav" aria-label="Main">
-          <Link href="/">Gallery</Link>
+          <Link href="/">Home</Link>
           <Link href="/lounge" className="nav-locked" data-locked={!user}>
-            Green Room
+            Find a spot
             {!user && (
               <svg aria-label="members only" width="12" height="12" viewBox="0 0 24 24" fill="none">
                 <rect x="4" y="10" width="16" height="11" rx="2" stroke="currentColor" strokeWidth="2.5" />

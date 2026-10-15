@@ -1,0 +1,77 @@
+import { parseSpot, type Caption } from "@/lib/captions";
+import { VoteButtons } from "./VoteButtons";
+
+type Props = { captions: Caption[]; signedIn: boolean; visible?: number; emptyText?: string };
+
+/**
+ * AI captions for one image, best first. The leader gets a "crowd favorite" tag.
+ * Only the top `visible` captions show; the rest fold away behind "Show more".
+ */
+export function CaptionList({
+  captions,
+  signedIn,
+  visible = 4,
+  emptyText = "Nothing here yet.",
+}: Props) {
+  if (captions.length === 0) return <p className="caption-empty">{emptyText}</p>;
+
+  const top = captions.slice(0, visible);
+  const rest = captions.slice(visible);
+
+  return (
+    <div className="caption-stack">
+      <ol className="caption-list">
+        {top.map((caption, index) => (
+          <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={index === 0 && caption.score > 0} />
+        ))}
+      </ol>
+      {rest.length > 0 && (
+        <details className="caption-more">
+          <summary>
+            Show {rest.length} more caption{rest.length === 1 ? "" : "s"}
+          </summary>
+          <ol className="caption-list">
+            {rest.map((caption) => (
+              <CaptionRow key={caption.id} caption={caption} signedIn={signedIn} leader={false} />
+            ))}
+          </ol>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CaptionRow({ caption, signedIn, leader }: { caption: Caption; signedIn: boolean; leader: boolean }) {
+  return (
+    <li className="caption-row" data-leader={leader}>
+      <VoteButtons captionId={caption.id} score={caption.score} myVote={caption.myVote} signedIn={signedIn} />
+      <div className="caption-body">
+        {leader && <span className="leader-tag">👑 Crowd favorite</span>}
+        <CaptionContent content={caption.content} />
+      </div>
+    </li>
+  );
+}
+
+/** Place recommendations render as name + neighborhood + reason; anything else as plain text. */
+function CaptionContent({ content }: { content: string }) {
+  const spot = parseSpot(content);
+  if (!spot) return <p className="caption-text">{content}</p>;
+
+  const maps = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${spot.name} ${spot.area} New York`)}`;
+  return (
+    <div className="spot">
+      <p className="spot-name">
+        {spot.name}
+        {spot.price && <span className="spot-price">{spot.price}</span>}
+      </p>
+      <p className="spot-meta">
+        {spot.area && <span>📍 {spot.area}</span>}
+        <a href={maps} target="_blank" rel="noopener noreferrer">
+          Open in Maps ↗
+        </a>
+      </p>
+      <p className="caption-text">{spot.why}</p>
+    </div>
+  );
+}
