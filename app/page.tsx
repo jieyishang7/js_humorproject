@@ -19,11 +19,10 @@ export default async function Home() {
   const { user, profile } = session;
   const signedIn = Boolean(user);
 
-  const [captions, requests, savedIds] = await Promise.all([
-    getCaptions(user?.id ?? null),
-    getSpotRequests(6),
-    getSavedIds(user?.id ?? null),
-  ]);
+  // AI picks and votes are members-only: signed-out visitors don't load them at all.
+  const [captions, requests, savedIds] = user
+    ? await Promise.all([getCaptions(user.id), getSpotRequests(6), getSavedIds(user.id)])
+    : [[], [], new Set<number>()];
   const spots = captions.filter((c) => c.request_id !== null);
 
   return (
@@ -74,12 +73,13 @@ export default async function Home() {
         <aside className="gate gate-locked">
           <div>
             <p className="gate-label">Members only</p>
-            <p className="gate-text">Sign in to ask the AI for spots and vote on everyone&apos;s picks.</p>
+            <p className="gate-text">Sign in to ask the AI for spots, see everyone&apos;s picks, and like your favorites.</p>
           </div>
           <GoogleSignInButton label="Sign in with Google" />
         </aside>
       )}
 
+      {signedIn && (
       <section aria-labelledby="latest-title" className="latest">
         <div className="latest-head">
           <h2 id="latest-title" className="section-title">
@@ -111,6 +111,7 @@ export default async function Home() {
           </ul>
         )}
       </section>
+      )}
     </main>
   );
 }

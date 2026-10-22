@@ -54,7 +54,18 @@ export const getCurrentUser = cache(async (): Promise<{ user: User | null; profi
     .eq("id", user.id)
     .maybeSingle<Profile>();
 
-  if (error) console.error("Could not load profile:", error.message);
+  if (!error) return { user, profile: profile ?? null };
 
-  return { user, profile: profile ?? null };
+  // Fall back to the core columns so a missing optional column can never lock people out.
+  console.error("Could not load full profile, retrying core columns:", error.message);
+  const { data: core } = await supabase
+    .from("profiles")
+    .select("id, email, first_name, last_name, tagline, avatar_url, created_at, updated_at")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  return {
+    user,
+    profile: core ? { ...core, current_area: null, cities_visited: null, favorite_spot: null } : null,
+  };
 });
