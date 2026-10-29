@@ -47,34 +47,37 @@ export function CaptionList({
 function CaptionRow(props: { caption: Caption; signedIn: boolean; leader: boolean; saved: boolean }) {
   const { caption, signedIn, leader, saved } = props;
   const isSpot = caption.request_id !== null;
+  const image = isSpot ? caption.image : null;
+  const isAi = image?.source.startsWith("AI image") ?? false;
   return (
     <li className="caption-row" data-leader={leader}>
-      <div className="caption-body">
-        {leader && <span className="leader-tag">👑 Crowd favorite</span>}
-        <CaptionContent content={caption.content} />
-        {isSpot && caption.image && (
+      <div className={`caption-body${image ? " has-photo" : ""}`}>
+        {image && (
           <figure className="spot-photo">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="spot-image" src={caption.image.url} alt={caption.image.label} loading="lazy" referrerPolicy="no-referrer" />
-            <figcaption className="spot-image-note">
-              {caption.image.label} ·{" "}
-              {caption.image.link ? (
-                <>
-                  photo via{" "}
-                  <a href={caption.image.link} target="_blank" rel="noopener noreferrer">
-                    {caption.image.source}
-                  </a>
-                </>
-              ) : (
-                caption.image.source
-              )}
-            </figcaption>
+            <img className="spot-image" src={image.url} alt={image.label} loading="lazy" referrerPolicy="no-referrer" />
+            <figcaption className="spot-photo-tag">{image.label}</figcaption>
+            {isAi ? (
+              <span className="spot-photo-badge" title={image.source}>
+                AI image
+              </span>
+            ) : image.link ? (
+              <a className="spot-photo-badge" href={image.link} target="_blank" rel="noopener noreferrer">
+                {image.source}
+              </a>
+            ) : (
+              <span className="spot-photo-badge">{image.source}</span>
+            )}
           </figure>
         )}
-        <div className="caption-actions">
-          <VoteButtons captionId={caption.id} score={caption.score} myVote={caption.myVote} signedIn={signedIn} />
-          {isSpot && <PlanButton captionId={caption.id} saved={saved} signedIn={signedIn} />}
-          {isSpot && signedIn && !caption.image && <SpotImageButton captionId={caption.id} />}
+        <div className="spot-main">
+          {leader && <span className="leader-tag">👑 Crowd favorite</span>}
+          <CaptionContent content={caption.content} />
+          <div className="caption-actions">
+            <VoteButtons captionId={caption.id} score={caption.score} myVote={caption.myVote} signedIn={signedIn} />
+            {isSpot && <PlanButton captionId={caption.id} saved={saved} signedIn={signedIn} />}
+            {isSpot && signedIn && !caption.image && <SpotImageButton captionId={caption.id} />}
+          </div>
         </div>
       </div>
     </li>

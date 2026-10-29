@@ -2324,3 +2324,68 @@ body {
   position: relative;
   white-space: nowrap;
 }
+
+/* Spot cards: photo on the left, details on the right (stacks on phones) */
+.caption-body.has-photo {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.caption-body.has-photo .spot-photo {
+  position: relative;
+  margin: 0;
+}
+
+.caption-body.has-photo .spot-image {
+  width: 100%;
+  max-width: none;
+  aspect-ratio: 1 / 1;
+  margin: 0;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
+.spot-photo-tag {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 5px 9px;
+  border-radius: 10px;
+  background: rgba(20, 20, 24, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  backdrop-filter: blur(4px);
+}
+
+.spot-photo-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.spot-main {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .caption-body.has-photo {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .caption-body.has-photo .spot-image {
+    aspect-ratio: 4 / 3;
+  }
+}
