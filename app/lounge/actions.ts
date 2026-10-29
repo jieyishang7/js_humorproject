@@ -238,7 +238,7 @@ export async function createSpotRequest(formData: FormData) {
     )
     .select("id, content, request_id");
   if (spotsError) console.error("Saving spots failed:", spotsError.message);
-  await attachPhotos(supabase, user.id, (saved ?? []) as { id: number; content: string; request_id: number }[]);
+  void saved; // Food photos are added by the page right after (SpotImageButton), so this returns fast.
 
   await saveChainLogs(supabase, user.id, request.id, result.result);
 
@@ -272,7 +272,7 @@ export async function suggestAnotherSpot(formData: FormData) {
       content: JSON.stringify(result.spots[0]),
     })
     .select("id, content, request_id");
-  await attachPhotos(supabase, user.id, (added ?? []) as { id: number; content: string; request_id: number }[]);
+  void added;
 
   revalidatePath("/");
   revalidatePath("/lounge");
@@ -596,19 +596,6 @@ function spotOf(content: string): Spot | null {
     return spot?.name ? spot : null;
   } catch {
     return null;
-  }
-}
-
-/** Adds food photos to freshly recommended spots. Never throws. */
-async function attachPhotos(supabase: Client, userId: string, rows: { id: number; content: string; request_id?: number | null }[]) {
-  try {
-    const items = rows.map((r) => ({ id: r.id, spot: spotOf(r.content) })).filter((x): x is { id: number; spot: Spot } => x.spot !== null);
-    if (items.length === 0) return;
-    const dishes = await pickDishes(supabase, userId, rows[0]?.request_id ?? null, items.map((x) => x.spot));
-    const requestId = rows[0]?.request_id ?? null;
-    await Promise.all(items.map((x, i) => saveDishPhoto(supabase, userId, x.id, dishes[i] ?? "", x.spot, requestId).catch(() => false)));
-  } catch (error) {
-    console.error("Attaching photos failed:", error);
   }
 }
 

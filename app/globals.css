@@ -2299,3 +2299,28 @@ body {
   font-size: 13px;
   color: #777;
 }
+
+/* Progress bar shown on AI buttons while they work */
+.progress-btn {
+  position: relative;
+  overflow: hidden;
+  min-width: 230px;
+  opacity: 1 !important;
+  cursor: progress;
+}
+
+.progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(255, 255, 255, 0.28);
+  transition: width 0.2s linear;
+}
+
+.btn-secondary .progress-fill {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.progress-text {
+  position: relative;
+  white-space: nowrap;
+}
