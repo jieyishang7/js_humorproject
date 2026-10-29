@@ -490,9 +490,28 @@ async function generateDishImage(
 ): Promise<{ url: string; model: string } | null> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
   if (!apiKey) return null;
-  const prompt =
-    `An appetizing, realistic close-up food photo of ${dish}, as served at ${spot.name} in ${spot.area || "New York City"}. ` +
-    "Natural light, shallow depth of field, on a table, no text, no logos, no watermark.";
+  // Different camera setups so pictures of different places don't all look alike.
+  const shots = [
+    "overhead flat-lay shot on the restaurant's own table, with other plates and hands reaching in",
+    "eye-level shot at the counter, the kitchen and staff visible behind it",
+    "window-seat shot with the New York street outside the glass",
+    "night shot with neon signs and warm light, slightly moody",
+    "takeout shot: the food in its box or wrapper held up on the sidewalk outside the storefront",
+    "wide shot of the dining room showing the decor, the dish in the foreground",
+    "bright daytime shot at an outdoor table or bench nearby",
+    "candid shot of friends sharing the dish, the place's interior around them",
+  ];
+  const seed = [...`${spot.name}${dish}`].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const shot = shots[seed % shots.length];
+  const prompt = [
+    `A realistic photo of ${dish} at ${spot.name}, ${spot.area || "New York City"}.`,
+    spot.why ? `What makes this place special: ${spot.why}` : "",
+    "Show what this particular place looks like (its decor, counter, signage style, crowd and neighborhood) so it feels distinct from other restaurants.",
+    `Composition: ${shot}.`,
+    "Photorealistic, no readable text, no logos, no watermark.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   let image: { bytes: Buffer; mime: string; model: string } | null = null;
   let lastError = "";
