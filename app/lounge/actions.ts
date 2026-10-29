@@ -461,10 +461,102 @@ async function pickDishes(supabase: Client, userId: string, requestId: number | 
   return dishes;
 }
 
-/** Finds and saves a food photo for one spot. Returns false when none was found. */
-async function saveDishPhoto(supabase: Client, userId: string, captionId: number, dish: string): Promise<boolean> {
+/** Image-capable Gemini models this key can call, best guess first. */
+async function imageModels(apiKey: string): Promise<string[]> {
+  if (process.env.GEMINI_IMAGE_MODEL) return [process.env.GEMINI_IMAGE_MODEL];
+  const response = await fetch(`${GEMINI_API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
+  const body = (await response.json().catch(() => null)) as { models?: GeminiModel[] } | null;
+  const listed = (body?.models ?? [])
+    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+    .map((m) => m.name.replace(/^models\//, ""))
+    .filter((name) => name.includes("image") && name.startsWith("gemini"))
+    .sort((a, b) => {
+      // Cheaper "flash" models first, stable before preview, newest first.
+      const rank = (n: string) => (n.includes("flash") ? 0 : 2) + (n.includes("preview") ? 1 : 0);
+      return rank(a) - rank(b) || b.localeCompare(a, undefined, { numeric: true });
+    });
+  return [...new Set([...listed, "gemini-2.5-flash-image"])].slice(0, 3);
+}
+
+type ImagePart = { text?: string; inlineData?: { mimeType: string; data: string }; inline_data?: { mime_type: string; data: string } };
+
+/** Generates a food photo with a Gemini image model. Null when the key has no image quota. */
+async function generateDishImage(
+  supabase: Client,
+  userId: string,
+  requestId: number | null,
+  dish: string,
+  spot: Spot,
+): Promise<{ url: string; model: string } | null> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
+  if (!apiKey) return null;
+  const prompt =
+    `An appetizing, realistic close-up food photo of ${dish}, as served at ${spot.name} in ${spot.area || "New York City"}. ` +
+    "Natural light, shallow depth of field, on a table, no text, no logos, no watermark.";
+
+  let image: { bytes: Buffer; mime: string; model: string } | null = null;
+  let lastError = "";
+  const started = Date.now();
+  for (const model of await imageModels(apiKey)) {
+    try {
+      const response = await fetch(`${GEMINI_API}/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | { candidates?: { content?: { parts?: ImagePart[] } }[]; error?: { message?: string } }
+        | null;
+      const part = result?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data || p.inline_data?.data);
+      if (response.ok && part) {
+        const data = part.inlineData?.data ?? part.inline_data!.data;
+        image = { bytes: Buffer.from(data, "base64"), mime: part.inlineData?.mimeType ?? part.inline_data?.mime_type ?? "image/png", model };
+        break;
+      }
+      lastError = `${model}: ${response.status} ${result?.error?.message ?? "no image returned"}`;
+      if (response.status !== 404 && response.status !== 429 && response.status !== 400) break;
+    } catch (error) {
+      lastError = `${model}: ${String(error)}`;
+    }
+  }
+
+  let url: string | null = null;
+  if (image) {
+    const ext = image.mime.includes("jpeg") ? "jpg" : image.mime.includes("webp") ? "webp" : "png";
+    const path = `${userId}/food/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("uploads").upload(path, image.bytes, { contentType: image.mime });
+    if (error) lastError = `stored failed: ${error.message}`;
+    else url = supabase.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+  }
+
+  // Log every image call so it shows up in the admin's LLM responses.
+  await supabase.from("llm_responses").insert({
+    profile_id: userId,
+    spot_request_id: requestId,
+    provider_model_id: image?.model ?? null,
+    system_prompt: "Food photo (image generation)",
+    user_prompt: prompt,
+    response: url ?? lastError,
+    processing_time_seconds: Math.round(((Date.now() - started) / 1000) * 100) / 100,
+    succeeded: Boolean(url),
+  });
+  return url && image ? { url, model: image.model } : null;
+}
+
+/** AI-generated food photo first; a real photo of the dish from Wikipedia if that fails. */
+async function saveDishPhoto(
+  supabase: Client,
+  userId: string,
+  captionId: number,
+  dish: string,
+  spot: Spot,
+  requestId: number | null,
+): Promise<boolean> {
   if (!dish) return false;
-  const photo = await findDishPhoto(dish);
+  const generated = await generateDishImage(supabase, userId, requestId, dish, spot).catch(() => null);
+  const photo = generated
+    ? { url: generated.url, source: `AI image (${generated.model})`, sourceUrl: null as string | null, kind: "dish" }
+    : await findDishPhoto(dish).then((p) => (p ? { url: p.url, source: p.source as string, sourceUrl: p.sourceUrl as string | null, kind: "dish" } : null));
   if (!photo) return false;
   const { error } = await supabase.from("spot_images").insert({
     caption_id: captionId,
@@ -472,7 +564,7 @@ async function saveDishPhoto(supabase: Client, userId: string, captionId: number
     model: photo.source,
     prompt: `Try: ${dish}`,
     source_url: photo.sourceUrl,
-    photo_kind: "dish",
+    photo_kind: photo.kind,
     profile_id: userId,
   });
   if (error) console.error("Saving food photo failed:", error.message);
@@ -494,7 +586,8 @@ async function attachPhotos(supabase: Client, userId: string, rows: { id: number
     const items = rows.map((r) => ({ id: r.id, spot: spotOf(r.content) })).filter((x): x is { id: number; spot: Spot } => x.spot !== null);
     if (items.length === 0) return;
     const dishes = await pickDishes(supabase, userId, rows[0]?.request_id ?? null, items.map((x) => x.spot));
-    await Promise.all(items.map((x, i) => saveDishPhoto(supabase, userId, x.id, dishes[i] ?? "").catch(() => false)));
+    const requestId = rows[0]?.request_id ?? null;
+    await Promise.all(items.map((x, i) => saveDishPhoto(supabase, userId, x.id, dishes[i] ?? "", x.spot, requestId).catch(() => false)));
   } catch (error) {
     console.error("Attaching photos failed:", error);
   }
@@ -510,7 +603,7 @@ export async function findSpotPhoto(captionId: number): Promise<{ ok: boolean; m
 
   const [dish] = await pickDishes(supabase, user.id, caption.request_id, [spot]);
   if (!dish) return { ok: false, message: "The AI didn't answer. Try again in a moment." };
-  const found = await saveDishPhoto(supabase, user.id, caption.id, dish);
+  const found = await saveDishPhoto(supabase, user.id, caption.id, dish, spot, caption.request_id);
   if (!found) return { ok: false, message: `Couldn't find a photo of ${dish}.` };
   revalidatePath("/");
   revalidatePath("/lounge");

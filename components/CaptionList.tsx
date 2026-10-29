@@ -57,11 +57,14 @@ function CaptionRow(props: { caption: Caption; signedIn: boolean; leader: boolea
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="spot-image" src={caption.image.url} alt={caption.image.label} loading="lazy" referrerPolicy="no-referrer" />
             <figcaption className="spot-image-note">
-              {caption.image.label} · photo via{" "}
+              {caption.image.label} ·{" "}
               {caption.image.link ? (
-                <a href={caption.image.link} target="_blank" rel="noopener noreferrer">
-                  {caption.image.source}
-                </a>
+                <>
+                  photo via{" "}
+                  <a href={caption.image.link} target="_blank" rel="noopener noreferrer">
+                    {caption.image.source}
+                  </a>
+                </>
               ) : (
                 caption.image.source
               )}
