@@ -25,6 +25,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent("Sign-in failed. Please try again.")}`);
   }
 
+  // Only allowed school domains or whitelisted e-mails may use the app (managed in the admin area).
+  // If the check itself fails, let the person in rather than locking everyone out.
+  const { data: allowed, error: allowError } = await supabase.rpc("can_sign_in");
+  if (!allowError && allowed === false) {
+    await supabase.auth.signOut();
+    const message = `Spot Finder is open to Columbia and Barnard students. ${data.user.email ?? "This account"} isn't on the list yet.`;
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(message)}`);
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("first_name, last_name")

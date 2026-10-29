@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { runChain, saveChainLogs } from "@/lib/chain";
 import { createClient } from "@/lib/supabase/server";
 
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
@@ -70,14 +71,25 @@ async function writeCaption(prompt: string, imageUrl: string): Promise<{ content
  * Calls Gemini, trying the next model when one is retired (404) or has no
  * quota (429). With `json`, asks for a JSON-only reply.
  */
-async function askGemini(apiKey: string, parts: object[], json = false): Promise<{ text: string; model: string } | null> {
-  for (const model of await candidateModels(apiKey)) {
+async function askGemini(
+  apiKey: string,
+  parts: object[],
+  json = false,
+  opts: { system?: string | null; temperature?: number | null; preferredModel?: string | null } = {},
+): Promise<{ text: string; model: string } | null> {
+  const candidates = await candidateModels(apiKey);
+  const models = opts.preferredModel ? [...new Set([opts.preferredModel, ...candidates])] : candidates;
+  for (const model of models) {
+    const generationConfig: Record<string, unknown> = {};
+    if (json) generationConfig.responseMimeType = "application/json";
+    if (typeof opts.temperature === "number") generationConfig.temperature = opts.temperature;
     const response = await fetch(`${GEMINI_API}/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ parts }],
-        ...(json ? { generationConfig: { responseMimeType: "application/json" } } : {}),
+        ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
+        ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
       }),
     });
     const result = await response.json().catch(() => null);
@@ -139,11 +151,42 @@ function parseSpots(text: string): Spot[] {
   }
 }
 
-async function recommendSpots(mood: string, count: number, avoid: string[], about: About = null) {
-  const prompt = spotPrompt(mood, count, avoid, about);
-  const answer = await askGemini(geminiKey(), [{ text: prompt }], true);
-  if (!answer) return null;
-  return { spots: parseSpots(answer.text).slice(0, count), model: answer.model, prompt };
+function aboutText(about: About) {
+  return [
+    about?.current_area && about.current_area !== "Not in NYC right now"
+      ? `They are based in ${about.current_area}; prefer places that are easy to reach from there.`
+      : "",
+    about?.favorite_spot ? `Their favorite hangout is ${about.favorite_spot}, so they may like places with a similar feel.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Runs a prompt chain from the database (chosen by the prompt chain mix, or by
+ * slug) and returns the parsed spots plus the logs to save as LLM responses.
+ */
+async function recommendSpots(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  mood: string,
+  count: number,
+  avoid: string[],
+  about: About = null,
+  slug?: string,
+) {
+  const apiKey = geminiKey();
+  const result = await runChain(
+    supabase,
+    ({ system, user, json, temperature, preferredModel }) =>
+      askGemini(apiKey, [{ text: user }], json, { system, temperature, preferredModel }),
+    {
+      slug,
+      vars: { mood, count: String(count), avoid: avoid.length ? avoid.join("; ") : "none", about: aboutText(about) },
+      fallbackPrompt: spotPrompt(mood, count, avoid, about),
+    },
+  );
+  const spots = result.output ? parseSpots(result.output).slice(0, count) : [];
+  return { spots, model: result.model ?? "unknown", prompt: result.prompt, result };
 }
 
 /** The signed-in user's location and favorite spot, if they filled them in. */
@@ -165,8 +208,11 @@ export async function createSpotRequest(formData: FormData) {
 
   const { supabase, user } = await requireUser();
 
-  const result = await recommendSpots(mood, 3, [], await getAbout(supabase, user.id));
-  if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
+  const result = await recommendSpots(supabase, mood, 3, [], await getAbout(supabase, user.id));
+  if (result.spots.length === 0) {
+    await saveChainLogs(supabase, user.id, null, result.result);
+    redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
+  }
 
   const { data: request, error } = await supabase
     .from("spot_requests")
@@ -189,6 +235,8 @@ export async function createSpotRequest(formData: FormData) {
   );
   if (spotsError) console.error("Saving spots failed:", spotsError.message);
 
+  await saveChainLogs(supabase, user.id, request.id, result.result);
+
   revalidatePath("/");
   revalidatePath("/lounge");
   redirect(`/lounge#request-${request.id}`);
@@ -205,8 +253,9 @@ export async function suggestAnotherSpot(formData: FormData) {
   const { data: existing } = await supabase.from("captions").select("content").eq("request_id", request.id);
   const avoid = (existing ?? []).flatMap((row) => parseSpots(row.content).map((s) => s.name));
 
-  const result = await recommendSpots(request.mood, 1, avoid, await getAbout(supabase, user.id));
-  if (!result || result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
+  const result = await recommendSpots(supabase, request.mood, 1, avoid, await getAbout(supabase, user.id), "suggest-another");
+  await saveChainLogs(supabase, user.id, request.id, result.result);
+  if (result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
 
   await supabase.from("captions").insert({
     request_id: request.id,
