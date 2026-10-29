@@ -2294,3 +2294,8 @@ body {
   color: inherit;
   text-decoration: underline;
 }
+
+.spot-image-loading {
+  font-size: 13px;
+  color: #777;
+}

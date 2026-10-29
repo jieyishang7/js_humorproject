@@ -1,44 +1,41 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { findSpotPhoto } from "@/app/lounge/actions";
 
-/** "Show food photo": AI picks a signature dish, then we find a real photo of it on Wikipedia. */
+// One photo at a time across the page, so a long list doesn't hit rate limits.
+let queue: Promise<unknown> = Promise.resolve();
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
+  const run = queue.then(job, job);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Older recommendations made before food photos existed: generate the photo
+ * automatically when the spot is shown. Saved once, so it only runs the first time.
+ */
 export function SpotImageButton({ captionId }: { captionId: number }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string | null>(null);
+  const started = useRef(false);
+  const [state, setState] = useState<"working" | "done" | "failed">("working");
 
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    enqueue(() => findSpotPhoto(captionId))
+      .then((result) => {
+        setState(result.ok ? "done" : "failed");
+        if (result.ok) router.refresh();
+      })
+      .catch(() => setState("failed"));
+  }, [captionId, router]);
+
+  if (state !== "working") return null;
   return (
-    <span className="spot-image-action">
-      <button
-        type="button"
-        className="plan-btn"
-        disabled={pending}
-        aria-busy={pending}
-        onClick={() =>
-          startTransition(async () => {
-            setMessage(null);
-            const result = await findSpotPhoto(captionId);
-            if (result.ok) router.refresh();
-            else setMessage(result.message ?? "No photo found.");
-          })
-        }
-      >
-        {pending ? (
-          <>
-            <span className="spinner" aria-hidden="true" /> Looking…
-          </>
-        ) : (
-          "🍜 Show food photo"
-        )}
-      </button>
-      {message && (
-        <span className="spot-image-error" role="status">
-          {message}
-        </span>
-      )}
+    <span className="spot-image-action spot-image-loading" role="status">
+      <span className="spinner" aria-hidden="true" /> Cooking up a food photo…
     </span>
   );
 }
