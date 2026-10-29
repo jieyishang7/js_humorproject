@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runChain, saveChainLogs } from "@/lib/chain";
-import { findDishPhoto } from "@/lib/photos";
+import { findDishPhoto, findPlacePhoto } from "@/lib/photos";
 import { createClient } from "@/lib/supabase/server";
 
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
@@ -432,18 +432,23 @@ async function pickDishes(supabase: Client, userId: string, requestId: number | 
   const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
   if (!apiKey || spots.length === 0) return [];
   const prompt = [
-    "For each New York City place below, name ONE specific food or drink a visitor should order or try there.",
-    "Use a common, searchable dish name (2-4 words, e.g. \"lomo saltado\", \"everything bagel\", \"matcha latte\", \"soup dumplings\").",
-    "For places that are not restaurants (parks, museums, bookstores), pick a snack or drink people usually enjoy nearby.",
+    "For each New York City place below, decide what one picture should show.",
+    'If the place is mainly about food or drink (restaurant, cafe, bakery, bar, food stall, market), use kind "food" and name ONE signature dish or drink to try there, as a common dish name of 2-4 words (e.g. "lomo saltado", "everything bagel", "matcha latte").',
+    'Otherwise (museum, gallery, park, bookstore, library, viewpoint, shop, venue), use kind "see" and name the ONE most memorable thing to see there, in 3-8 words (e.g. "Sorolla murals in the main gallery", "the High Line at sunset", "floor-to-ceiling used book stacks"). Never pick food for these places.',
     `Places: ${spots.map((s, i) => `${i + 1}. ${s.name} (${s.area}) - ${s.why}`).join(" ")}`,
-    'Reply with JSON only: an array of strings in the same order, one dish per place.',
+    'Reply with JSON only: an array in the same order, one object per place: {"kind": "food" or "see", "subject": "..."}.',
   ].join(" ");
   const started = Date.now();
   const answer = await askGemini(apiKey, [{ text: prompt }], true);
   let dishes: string[] = [];
   try {
     const data = JSON.parse((answer?.text ?? "[]").replace(/^```(?:json)?|```$/g, "").trim());
-    dishes = (Array.isArray(data) ? data : []).map((d) => (typeof d === "string" ? d : String(d?.dish ?? ""))).map((d) => d.slice(0, 60));
+    // Encoded as "food:<dish>" or "see:<sight>".
+    dishes = (Array.isArray(data) ? data : []).map((d) => {
+      if (typeof d === "string") return `food:${d.slice(0, 60)}`;
+      const subject = String(d?.subject ?? d?.dish ?? "").slice(0, 80);
+      return subject ? `${d?.kind === "see" ? "see" : "food"}:${subject}` : "";
+    });
   } catch {
     dishes = [];
   }
@@ -487,6 +492,7 @@ async function generateDishImage(
   requestId: number | null,
   dish: string,
   spot: Spot,
+  kind: "food" | "see" = "food",
 ): Promise<{ url: string; model: string } | null> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
   if (!apiKey) return null;
@@ -503,15 +509,34 @@ async function generateDishImage(
   ];
   const seed = [...`${spot.name}${dish}`].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
   const shot = shots[seed % shots.length];
-  const prompt = [
-    `A realistic photo of ${dish} at ${spot.name}, ${spot.area || "New York City"}.`,
-    spot.why ? `What makes this place special: ${spot.why}` : "",
-    "Show what this particular place looks like (its decor, counter, signage style, crowd and neighborhood) so it feels distinct from other restaurants.",
-    `Composition: ${shot}.`,
-    "Photorealistic, no readable text, no logos, no watermark.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const scenes = [
+    "wide shot showing the whole space and a few visitors",
+    "eye-level shot from where a visitor would stand",
+    "golden-hour light with long shadows",
+    "quiet early-morning atmosphere",
+    "detail shot with the surroundings softly visible",
+    "view from the entrance looking in",
+  ];
+  const prompt =
+    kind === "see"
+      ? [
+          `A realistic photo of ${dish} at ${spot.name}, ${spot.area || "New York City"}.`,
+          spot.why ? `Why people go: ${spot.why}` : "",
+          "Show the place itself (architecture, interior or landscape) as a visitor would experience it. No food.",
+          `Composition: ${scenes[seed % scenes.length]}.`,
+          "Photorealistic, no readable text, no logos, no watermark.",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : [
+      `A realistic photo of ${dish} at ${spot.name}, ${spot.area || "New York City"}.`,
+      spot.why ? `What makes this place special: ${spot.why}` : "",
+      "Show what this particular place looks like (its decor, counter, signage style, crowd and neighborhood) so it feels distinct from other restaurants.",
+      `Composition: ${shot}.`,
+      "Photorealistic, no readable text, no logos, no watermark.",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   let image: { bytes: Buffer; mime: string; model: string } | null = null;
   let lastError = "";
@@ -572,18 +597,30 @@ async function saveDishPhoto(
   requestId: number | null,
 ): Promise<boolean> {
   if (!dish) return false;
-  const generated = await generateDishImage(supabase, userId, requestId, dish, spot).catch(() => null);
+  // dish is "food:<dish>" or "see:<sight>" (plain text = food, for older answers).
+  const kind: "food" | "see" = dish.startsWith("see:") ? "see" : "food";
+  const subject = dish.replace(/^(food|see):/, "").trim();
+  if (!subject) return false;
+  const photoKind = kind === "see" ? "scene" : "dish";
+  const generated = await generateDishImage(supabase, userId, requestId, subject, spot, kind).catch(() => null);
+  const fallback = generated
+    ? null
+    : kind === "see"
+      ? await findPlacePhoto(spot.name, spot.area)
+      : await findDishPhoto(subject);
   const photo = generated
-    ? { url: generated.url, source: `AI image (${generated.model})`, sourceUrl: null as string | null, kind: "dish" }
-    : await findDishPhoto(dish).then((p) => (p ? { url: p.url, source: p.source as string, sourceUrl: p.sourceUrl as string | null, kind: "dish" } : null));
+    ? { url: generated.url, source: `AI image (${generated.model})`, sourceUrl: null as string | null }
+    : fallback
+      ? { url: fallback.url, source: fallback.source as string, sourceUrl: fallback.sourceUrl as string | null }
+      : null;
   if (!photo) return false;
   const { error } = await supabase.from("spot_images").insert({
     caption_id: captionId,
     image_url: photo.url,
     model: photo.source,
-    prompt: `Try: ${dish}`,
+    prompt: kind === "see" ? `See: ${subject}` : `Try: ${subject}`,
     source_url: photo.sourceUrl,
-    photo_kind: photo.kind,
+    photo_kind: photoKind,
     profile_id: userId,
   });
   if (error) console.error("Saving food photo failed:", error.message);
@@ -610,7 +647,7 @@ export async function findSpotPhoto(captionId: number): Promise<{ ok: boolean; m
   const [dish] = await pickDishes(supabase, user.id, caption.request_id, [spot]);
   if (!dish) return { ok: false, message: "The AI didn't answer. Try again in a moment." };
   const found = await saveDishPhoto(supabase, user.id, caption.id, dish, spot, caption.request_id);
-  if (!found) return { ok: false, message: `Couldn't find a photo of ${dish}.` };
+  if (!found) return { ok: false, message: "Couldn't find a photo for this spot." };
   revalidatePath("/");
   revalidatePath("/lounge");
   return { ok: true };

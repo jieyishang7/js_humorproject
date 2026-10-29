@@ -38,7 +38,7 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
   const { data: imageRows } = await supabase
     .from("spot_images")
     .select("caption_id, image_url, model, prompt, source_url, photo_kind")
-    .eq("photo_kind", "dish")
+    .in("photo_kind", ["dish", "scene"])
     .order("created_datetime_utc", { ascending: true });
   for (const img of (imageRows ?? []) as ImageRow[]) {
     images.set(img.caption_id, { url: img.image_url, label: img.prompt ?? "Photo", source: img.model ?? "Wikipedia", link: img.source_url });
