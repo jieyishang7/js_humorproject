@@ -33,11 +33,12 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
   }
 
   // AI pictures of recommended spots (newest per spot). Optional: ignored if the table is missing.
-  type ImageRow = { caption_id: number; image_url: string; model: string | null; prompt: string | null; source_url: string | null };
+  type ImageRow = { caption_id: number; image_url: string; model: string | null; prompt: string | null; source_url: string | null; photo_kind: string | null };
   const images = new Map<number, Caption["image"]>();
   const { data: imageRows } = await supabase
     .from("spot_images")
-    .select("caption_id, image_url, model, prompt, source_url")
+    .select("caption_id, image_url, model, prompt, source_url, photo_kind")
+    .eq("photo_kind", "dish")
     .order("created_datetime_utc", { ascending: true });
   for (const img of (imageRows ?? []) as ImageRow[]) {
     images.set(img.caption_id, { url: img.image_url, label: img.prompt ?? "Photo", source: img.model ?? "Wikipedia", link: img.source_url });

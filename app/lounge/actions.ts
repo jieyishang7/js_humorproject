@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runChain, saveChainLogs } from "@/lib/chain";
-import { findPlacePhoto } from "@/lib/photos";
+import { findDishPhoto } from "@/lib/photos";
 import { createClient } from "@/lib/supabase/server";
 
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
@@ -236,9 +236,9 @@ export async function createSpotRequest(formData: FormData) {
         content: JSON.stringify(spot),
       })),
     )
-    .select("id, content");
+    .select("id, content, request_id");
   if (spotsError) console.error("Saving spots failed:", spotsError.message);
-  await attachPhotos(supabase, user.id, (saved ?? []) as { id: number; content: string }[]);
+  await attachPhotos(supabase, user.id, (saved ?? []) as { id: number; content: string; request_id: number }[]);
 
   await saveChainLogs(supabase, user.id, request.id, result.result);
 
@@ -271,8 +271,8 @@ export async function suggestAnotherSpot(formData: FormData) {
       model: result.model,
       content: JSON.stringify(result.spots[0]),
     })
-    .select("id, content");
-  await attachPhotos(supabase, user.id, (added ?? []) as { id: number; content: string }[]);
+    .select("id, content, request_id");
+  await attachPhotos(supabase, user.id, (added ?? []) as { id: number; content: string; request_id: number }[]);
 
   revalidatePath("/");
   revalidatePath("/lounge");
@@ -427,48 +427,91 @@ export async function togglePlan(captionId: number, save: boolean) {
 
 type Client = Awaited<ReturnType<typeof createClient>>;
 
-/** Looks up and saves a photo for one spot. Returns false when none was found. */
-async function savePhoto(supabase: Client, userId: string, captionId: number, content: string): Promise<boolean> {
-  let spot: Spot | null = null;
+/** Asks Gemini for one signature dish or drink per place (same order), e.g. ["lomo saltado", "matcha latte"]. */
+async function pickDishes(supabase: Client, userId: string, requestId: number | null, spots: Spot[]): Promise<string[]> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
+  if (!apiKey || spots.length === 0) return [];
+  const prompt = [
+    "For each New York City place below, name ONE specific food or drink a visitor should order or try there.",
+    "Use a common, searchable dish name (2-4 words, e.g. \"lomo saltado\", \"everything bagel\", \"matcha latte\", \"soup dumplings\").",
+    "For places that are not restaurants (parks, museums, bookstores), pick a snack or drink people usually enjoy nearby.",
+    `Places: ${spots.map((s, i) => `${i + 1}. ${s.name} (${s.area}) - ${s.why}`).join(" ")}`,
+    'Reply with JSON only: an array of strings in the same order, one dish per place.',
+  ].join(" ");
+  const started = Date.now();
+  const answer = await askGemini(apiKey, [{ text: prompt }], true);
+  let dishes: string[] = [];
   try {
-    spot = JSON.parse(content) as Spot;
+    const data = JSON.parse((answer?.text ?? "[]").replace(/^```(?:json)?|```$/g, "").trim());
+    dishes = (Array.isArray(data) ? data : []).map((d) => (typeof d === "string" ? d : String(d?.dish ?? ""))).map((d) => d.slice(0, 60));
   } catch {
-    spot = null;
+    dishes = [];
   }
-  if (!spot?.name) return false;
-  const photo = await findPlacePhoto(spot.name, spot.area);
+  const { error } = await supabase.from("llm_responses").insert({
+    profile_id: userId,
+    spot_request_id: requestId,
+    provider_model_id: answer?.model ?? null,
+    system_prompt: "Signature dish per spot (for food photos)",
+    user_prompt: prompt,
+    response: answer?.text ?? null,
+    processing_time_seconds: Math.round(((Date.now() - started) / 1000) * 100) / 100,
+    succeeded: Boolean(answer),
+  });
+  if (error) console.error("Logging dish call failed:", error.message);
+  return dishes;
+}
+
+/** Finds and saves a food photo for one spot. Returns false when none was found. */
+async function saveDishPhoto(supabase: Client, userId: string, captionId: number, dish: string): Promise<boolean> {
+  if (!dish) return false;
+  const photo = await findDishPhoto(dish);
   if (!photo) return false;
   const { error } = await supabase.from("spot_images").insert({
     caption_id: captionId,
     image_url: photo.url,
     model: photo.source,
-    prompt: photo.kind === "area" ? `Photo of the area: ${spot.area}` : `Photo of ${spot.name}`,
+    prompt: `Try: ${dish}`,
     source_url: photo.sourceUrl,
-    photo_kind: photo.kind,
+    photo_kind: "dish",
     profile_id: userId,
   });
-  if (error) console.error("Saving spot photo failed:", error.message);
+  if (error) console.error("Saving food photo failed:", error.message);
   return !error;
 }
 
-/** Adds photos to freshly recommended spots. Never throws and never blocks for long. */
-async function attachPhotos(supabase: Client, userId: string, spots: { id: number; content: string }[]) {
+function spotOf(content: string): Spot | null {
   try {
-    await Promise.all(spots.map((s) => savePhoto(supabase, userId, s.id, s.content).catch(() => false)));
+    const spot = JSON.parse(content) as Spot;
+    return spot?.name ? spot : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Adds food photos to freshly recommended spots. Never throws. */
+async function attachPhotos(supabase: Client, userId: string, rows: { id: number; content: string; request_id?: number | null }[]) {
+  try {
+    const items = rows.map((r) => ({ id: r.id, spot: spotOf(r.content) })).filter((x): x is { id: number; spot: Spot } => x.spot !== null);
+    if (items.length === 0) return;
+    const dishes = await pickDishes(supabase, userId, rows[0]?.request_id ?? null, items.map((x) => x.spot));
+    await Promise.all(items.map((x, i) => saveDishPhoto(supabase, userId, x.id, dishes[i] ?? "").catch(() => false)));
   } catch (error) {
     console.error("Attaching photos failed:", error);
   }
 }
 
-/** "Show photo" on an older recommendation that doesn't have one yet. */
+/** "Show food photo" on an older recommendation. */
 export async function findSpotPhoto(captionId: number): Promise<{ ok: boolean; message?: string }> {
   if (!Number.isInteger(captionId)) return { ok: false, message: "Unknown spot." };
   const { supabase, user } = await requireUser();
   const { data: caption } = await supabase.from("captions").select("id, content, request_id").eq("id", captionId).maybeSingle();
-  if (!caption?.request_id) return { ok: false, message: "That spot no longer exists." };
+  const spot = caption ? spotOf(caption.content) : null;
+  if (!caption?.request_id || !spot) return { ok: false, message: "That spot no longer exists." };
 
-  const found = await savePhoto(supabase, user.id, caption.id, caption.content);
-  if (!found) return { ok: false, message: "No public photo found for this place yet." };
+  const [dish] = await pickDishes(supabase, user.id, caption.request_id, [spot]);
+  if (!dish) return { ok: false, message: "The AI didn't answer. Try again in a moment." };
+  const found = await saveDishPhoto(supabase, user.id, caption.id, dish);
+  if (!found) return { ok: false, message: `Couldn't find a photo of ${dish}.` };
   revalidatePath("/");
   revalidatePath("/lounge");
   return { ok: true };

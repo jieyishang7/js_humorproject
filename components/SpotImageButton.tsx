@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { findSpotPhoto } from "@/app/lounge/actions";
 
-/** "Show photo": finds a real photo of the spot on Wikipedia / Wikimedia Commons. */
+/** "Show food photo": AI picks a signature dish, then we find a real photo of it on Wikipedia. */
 export function SpotImageButton({ captionId }: { captionId: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -31,7 +31,7 @@ export function SpotImageButton({ captionId }: { captionId: number }) {
             <span className="spinner" aria-hidden="true" /> Looking…
           </>
         ) : (
-          "📷 Show photo"
+          "🍜 Show food photo"
         )}
       </button>
       {message && (

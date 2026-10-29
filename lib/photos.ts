@@ -90,3 +90,23 @@ export async function findPlacePhoto(name: string, area?: string | null): Promis
     (await fromWikipedia(`${cleanArea} New York City`, cleanArea));
   return areaPhoto ? { ...areaPhoto, kind: "area" } : null;
 }
+
+/** A photo of a dish or drink (e.g. "lomo saltado", "everything bagel"). Dishes are well covered on Wikipedia. */
+export async function findDishPhoto(dish: string): Promise<PlacePhoto | null> {
+  const name = dish.trim();
+  if (!name) return null;
+  const found =
+    (await fromWikipedia(name, name)) ??
+    (await fromWikipedia(`${name} food`, name)) ??
+    (await fromCommons(`${name} food`, name)) ??
+    (await fromCommons(name, name));
+  if (found) return found;
+  // "spicy cumin lamb noodles" -> try the last two words ("lamb noodles"), then the last ("noodles").
+  const parts = words(name);
+  for (const shorter of [parts.slice(-2).join(" "), parts.slice(-1).join(" ")]) {
+    if (!shorter || shorter === name.toLowerCase()) continue;
+    const photo = (await fromWikipedia(shorter, shorter)) ?? (await fromCommons(`${shorter} food`, shorter));
+    if (photo) return photo;
+  }
+  return null;
+}
