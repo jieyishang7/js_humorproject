@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { generateSpotImage } from "@/app/lounge/actions";
+import { findSpotPhoto } from "@/app/lounge/actions";
 
-/** "Generate picture" for a recommended spot. Image generation can take ~10–20 s. */
+/** "Show photo": finds a real photo of the spot on Wikipedia / Wikimedia Commons. */
 export function SpotImageButton({ captionId }: { captionId: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -20,18 +20,18 @@ export function SpotImageButton({ captionId }: { captionId: number }) {
         onClick={() =>
           startTransition(async () => {
             setMessage(null);
-            const result = await generateSpotImage(captionId);
+            const result = await findSpotPhoto(captionId);
             if (result.ok) router.refresh();
-            else setMessage(result.message ?? "Couldn't make a picture.");
+            else setMessage(result.message ?? "No photo found.");
           })
         }
       >
         {pending ? (
           <>
-            <span className="spinner" aria-hidden="true" /> Painting…
+            <span className="spinner" aria-hidden="true" /> Looking…
           </>
         ) : (
-          "🎨 Generate picture"
+          "📷 Show photo"
         )}
       </button>
       {message && (

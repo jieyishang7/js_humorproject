@@ -2281,3 +2281,16 @@ body {
   font-size: 13px;
   color: #b42318;
 }
+
+.spot-photo {
+  margin: 10px 0 4px;
+}
+
+.spot-photo .spot-image {
+  margin: 0 0 4px;
+}
+
+.spot-image-note a {
+  color: inherit;
+  text-decoration: underline;
+}

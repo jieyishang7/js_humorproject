@@ -10,6 +10,7 @@ export type Caption = {
   score: number;
   myVote: -1 | 0 | 1;
   imageUrl: string | null;
+  image: { url: string; label: string; source: string; link: string | null } | null;
 };
 
 export type Upload = { id: number; image_url: string; created_at: string };
@@ -32,12 +33,15 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
   }
 
   // AI pictures of recommended spots (newest per spot). Optional: ignored if the table is missing.
-  const images = new Map<number, string>();
+  type ImageRow = { caption_id: number; image_url: string; model: string | null; prompt: string | null; source_url: string | null };
+  const images = new Map<number, Caption["image"]>();
   const { data: imageRows } = await supabase
     .from("spot_images")
-    .select("caption_id, image_url")
+    .select("caption_id, image_url, model, prompt, source_url")
     .order("created_datetime_utc", { ascending: true });
-  for (const img of (imageRows ?? []) as { caption_id: number; image_url: string }[]) images.set(img.caption_id, img.image_url);
+  for (const img of (imageRows ?? []) as ImageRow[]) {
+    images.set(img.caption_id, { url: img.image_url, label: img.prompt ?? "Photo", source: img.model ?? "Wikipedia", link: img.source_url });
+  }
 
   return data
     .map((row) => {
@@ -52,7 +56,8 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
         created_at: row.created_at,
         score: votes.reduce((sum, v) => sum + v.value, 0),
         myVote: mine as Caption["myVote"],
-        imageUrl: images.get(row.id) ?? null,
+        imageUrl: images.get(row.id)?.url ?? null,
+        image: images.get(row.id) ?? null,
       };
     })
     .sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at));

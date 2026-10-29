@@ -28,3 +28,7 @@ create policy "Members add own spot images" on public.spot_images for insert to 
 drop policy if exists "Admins manage spot images" on public.spot_images;
 create policy "Admins manage spot images" on public.spot_images for all to authenticated
   using (public.is_superadmin()) with check (public.is_superadmin());
+
+-- Photos now come from Wikipedia / Wikimedia Commons instead of an image model.
+alter table public.spot_images add column if not exists source_url text;
+alter table public.spot_images add column if not exists photo_kind text;

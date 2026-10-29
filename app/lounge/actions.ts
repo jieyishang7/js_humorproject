@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runChain, saveChainLogs } from "@/lib/chain";
+import { findPlacePhoto } from "@/lib/photos";
 import { createClient } from "@/lib/supabase/server";
 
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
@@ -224,16 +225,20 @@ export async function createSpotRequest(formData: FormData) {
     redirect("/lounge?error=Couldn't+save+your+request.");
   }
 
-  const { error: spotsError } = await supabase.from("captions").insert(
-    result.spots.map((spot) => ({
-      request_id: request.id,
-      author_id: user.id,
-      prompt: result.prompt,
-      model: result.model,
-      content: JSON.stringify(spot),
-    })),
-  );
+  const { data: saved, error: spotsError } = await supabase
+    .from("captions")
+    .insert(
+      result.spots.map((spot) => ({
+        request_id: request.id,
+        author_id: user.id,
+        prompt: result.prompt,
+        model: result.model,
+        content: JSON.stringify(spot),
+      })),
+    )
+    .select("id, content");
   if (spotsError) console.error("Saving spots failed:", spotsError.message);
+  await attachPhotos(supabase, user.id, (saved ?? []) as { id: number; content: string }[]);
 
   await saveChainLogs(supabase, user.id, request.id, result.result);
 
@@ -257,13 +262,17 @@ export async function suggestAnotherSpot(formData: FormData) {
   await saveChainLogs(supabase, user.id, request.id, result.result);
   if (result.spots.length === 0) redirect("/lounge?error=The+AI+didn't+answer.+Try+again+in+a+moment.");
 
-  await supabase.from("captions").insert({
-    request_id: request.id,
-    author_id: user.id,
-    prompt: result.prompt,
-    model: result.model,
-    content: JSON.stringify(result.spots[0]),
-  });
+  const { data: added } = await supabase
+    .from("captions")
+    .insert({
+      request_id: request.id,
+      author_id: user.id,
+      prompt: result.prompt,
+      model: result.model,
+      content: JSON.stringify(result.spots[0]),
+    })
+    .select("id, content");
+  await attachPhotos(supabase, user.id, (added ?? []) as { id: number; content: string }[]);
 
   revalidatePath("/");
   revalidatePath("/lounge");
@@ -413,140 +422,53 @@ export async function togglePlan(captionId: number, save: boolean) {
 }
 
 /* ------------------------------------------------------------------ */
-/* AI pictures of recommended spots (Gemini image models).            */
+/* Real photos of recommended spots (Wikipedia / Wikimedia Commons).   */
 /* ------------------------------------------------------------------ */
 
-/** Image-capable Gemini models this key can call, best guess first. */
-async function imageModels(apiKey: string): Promise<string[]> {
-  if (process.env.GEMINI_IMAGE_MODEL) return [process.env.GEMINI_IMAGE_MODEL];
-  const response = await fetch(`${GEMINI_API}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey } });
-  const body = (await response.json().catch(() => null)) as { models?: GeminiModel[] } | null;
-  const listed = (body?.models ?? [])
-    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
-    .map((m) => m.name.replace(/^models\//, ""))
-    .filter((name) => name.includes("image") && name.startsWith("gemini"))
-    .sort((a, b) => {
-      // Cheaper "flash" models first, stable before preview, newest first.
-      const rank = (n: string) => (n.includes("flash") ? 0 : 2) + (n.includes("preview") ? 1 : 0);
-      return rank(a) - rank(b) || b.localeCompare(a, undefined, { numeric: true });
-    });
-  return [...new Set([...listed, "gemini-2.5-flash-image"])].slice(0, 4);
-}
+type Client = Awaited<ReturnType<typeof createClient>>;
 
-type ImagePart = { text?: string; inlineData?: { mimeType: string; data: string }; inline_data?: { mime_type: string; data: string } };
-
-/**
- * Generates a picture of a recommended spot, stores it in the `uploads` bucket
- * and records it in spot_images (plus an llm_responses log row for the admin).
- */
-export async function generateSpotImage(captionId: number): Promise<{ ok: boolean; message?: string }> {
-  if (!Number.isInteger(captionId)) return { ok: false, message: "Unknown spot." };
-  const { supabase, user } = await requireUser();
-  const apiKey = process.env.GEMINI_API_KEY || process.env.geminiapikey;
-  if (!apiKey) return { ok: false, message: "AI is not configured yet." };
-
-  const { data: caption } = await supabase
-    .from("captions")
-    .select("id, content, request_id, spot_requests(mood)")
-    .eq("id", captionId)
-    .maybeSingle();
-  if (!caption || !caption.request_id) return { ok: false, message: "That spot no longer exists." };
-
+/** Looks up and saves a photo for one spot. Returns false when none was found. */
+async function savePhoto(supabase: Client, userId: string, captionId: number, content: string): Promise<boolean> {
   let spot: Spot | null = null;
   try {
-    spot = JSON.parse(caption.content) as Spot;
+    spot = JSON.parse(content) as Spot;
   } catch {
     spot = null;
   }
-  if (!spot?.name) return { ok: false, message: "Only recommended places can get a picture." };
-  const request = (Array.isArray(caption.spot_requests) ? caption.spot_requests[0] : caption.spot_requests) as
-    | { mood: string }
-    | null;
+  if (!spot?.name) return false;
+  const photo = await findPlacePhoto(spot.name, spot.area);
+  if (!photo) return false;
+  const { error } = await supabase.from("spot_images").insert({
+    caption_id: captionId,
+    image_url: photo.url,
+    model: photo.source,
+    prompt: photo.kind === "area" ? `Photo of the area: ${spot.area}` : `Photo of ${spot.name}`,
+    source_url: photo.sourceUrl,
+    photo_kind: photo.kind,
+    profile_id: userId,
+  });
+  if (error) console.error("Saving spot photo failed:", error.message);
+  return !error;
+}
 
-  const prompt = [
-    `A warm, inviting photo-style illustration of ${spot.name}${spot.area ? ` in ${spot.area}, New York City` : ", New York City"}.`,
-    spot.why ? `Capture this feeling: ${spot.why}` : "",
-    request?.mood ? `The visitor is in the mood for: "${request.mood}".` : "",
-    "Show the atmosphere of the place with a few people, natural light, no text, no logos, no watermarks.",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  let image: { bytes: Buffer; mime: string; model: string } | null = null;
-  let lastError = "";
-  const started = Date.now();
-  for (const model of await imageModels(apiKey)) {
-    const response = await fetch(`${GEMINI_API}/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-      }),
-    });
-    const result = (await response.json().catch(() => null)) as
-      | { candidates?: { content?: { parts?: ImagePart[] } }[]; error?: { message?: string } }
-      | null;
-    const part = result?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data || p.inline_data?.data);
-    if (response.ok && part) {
-      const data = part.inlineData?.data ?? part.inline_data!.data;
-      const mime = part.inlineData?.mimeType ?? part.inline_data?.mime_type ?? "image/png";
-      image = { bytes: Buffer.from(data, "base64"), mime, model };
-      break;
-    }
-    lastError = `${model}: ${response.status} ${result?.error?.message ?? "no image returned"}`;
-    console.error("Spot image failed:", lastError);
-    if (response.status !== 404 && response.status !== 429 && response.status !== 400) break;
+/** Adds photos to freshly recommended spots. Never throws and never blocks for long. */
+async function attachPhotos(supabase: Client, userId: string, spots: { id: number; content: string }[]) {
+  try {
+    await Promise.all(spots.map((s) => savePhoto(supabase, userId, s.id, s.content).catch(() => false)));
+  } catch (error) {
+    console.error("Attaching photos failed:", error);
   }
-  const seconds = Math.round(((Date.now() - started) / 1000) * 100) / 100;
+}
 
-  // Log the call either way so it shows up in the admin's LLM responses.
-  const log = async (response: string, ok: boolean, model: string | null) => {
-    const { error } = await supabase.from("llm_responses").insert({
-      profile_id: user.id,
-      spot_request_id: caption.request_id,
-      provider_model_id: model,
-      system_prompt: "Spot picture (image generation)",
-      user_prompt: prompt,
-      response,
-      processing_time_seconds: seconds,
-      succeeded: ok,
-    });
-    if (error) console.error("Logging image call failed:", error.message);
-  };
+/** "Show photo" on an older recommendation that doesn't have one yet. */
+export async function findSpotPhoto(captionId: number): Promise<{ ok: boolean; message?: string }> {
+  if (!Number.isInteger(captionId)) return { ok: false, message: "Unknown spot." };
+  const { supabase, user } = await requireUser();
+  const { data: caption } = await supabase.from("captions").select("id, content, request_id").eq("id", captionId).maybeSingle();
+  if (!caption?.request_id) return { ok: false, message: "That spot no longer exists." };
 
-  if (!image) {
-    await log(lastError || "No image model available", false, null);
-    const quota = /429|quota|RESOURCE_EXHAUSTED/i.test(lastError);
-    return {
-      ok: false,
-      message: quota
-        ? "The image AI is out of free quota right now. Try again later."
-        : "The image AI couldn't make a picture for this spot.",
-    };
-  }
-
-  const ext = image.mime.includes("jpeg") ? "jpg" : image.mime.includes("webp") ? "webp" : "png";
-  const path = `${user.id}/spots/${captionId}-${Date.now()}.${ext}`;
-  const { error: uploadError } = await supabase.storage.from("uploads").upload(path, image.bytes, { contentType: image.mime });
-  if (uploadError) {
-    console.error("Storing spot image failed:", uploadError.message);
-    await log(`Generated, but storing failed: ${uploadError.message}`, false, image.model);
-    return { ok: false, message: "The picture was made, but saving it failed." };
-  }
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("uploads").getPublicUrl(path);
-
-  const { error } = await supabase
-    .from("spot_images")
-    .insert({ caption_id: captionId, image_url: publicUrl, model: image.model, prompt, profile_id: user.id });
-  if (error) {
-    console.error("Saving spot image failed:", error.message);
-    return { ok: false, message: "The picture was made, but saving it failed." };
-  }
-  await log(publicUrl, true, image.model);
-
+  const found = await savePhoto(supabase, user.id, caption.id, caption.content);
+  if (!found) return { ok: false, message: "No public photo found for this place yet." };
   revalidatePath("/");
   revalidatePath("/lounge");
   return { ok: true };
