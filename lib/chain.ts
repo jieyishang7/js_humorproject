@@ -1,4 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { createClient } from "@/lib/supabase/server";
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 /**
  * Runs a prompt chain from the database (prompt_chains / prompt_chain_steps),
@@ -48,15 +50,15 @@ function fill(template: string, vars: Record<string, string>) {
 async function pickChainId(supabase: SupabaseClient, slug?: string): Promise<number | null> {
   if (slug) {
     const { data } = await supabase.from("prompt_chains").select("id").eq("slug", slug).maybeSingle();
-    return data?.id ?? null;
+    return (data as { id: number } | null)?.id ?? null;
   }
   const { data } = await supabase.from("prompt_chain_mix").select("prompt_chain_id, weight").gt("weight", 0);
-  const mix = data ?? [];
-  const total = mix.reduce((sum, m) => sum + m.weight, 0);
+  const mix = (data ?? []) as { prompt_chain_id: number; weight: number }[];
+  const total = mix.reduce((sum: number, m) => sum + Number(m.weight), 0);
   if (total <= 0) return null;
   let roll = Math.random() * total;
   for (const m of mix) {
-    roll -= m.weight;
+    roll -= Number(m.weight);
     if (roll < 0) return m.prompt_chain_id;
   }
   return mix[mix.length - 1].prompt_chain_id;
@@ -64,13 +66,15 @@ async function pickChainId(supabase: SupabaseClient, slug?: string): Promise<num
 
 /** Terms and few-shot examples that get injected into {terms} / {examples}. */
 async function promptContext(supabase: SupabaseClient) {
-  const [{ data: terms }, { data: examples }] = await Promise.all([
+  const [termsRes, examplesRes] = await Promise.all([
     supabase.from("terms").select("term, definition").order("priority", { ascending: false }).limit(6),
     supabase.from("generation_examples").select("mood, example_output").order("priority", { ascending: false }).limit(2),
   ]);
+  const terms = (termsRes.data ?? []) as { term: string; definition: string }[];
+  const examples = (examplesRes.data ?? []) as { mood: string; example_output: string }[];
   return {
-    terms: terms?.length ? `NYC terms you may see: ${terms.map((t) => `${t.term} = ${t.definition}`).join(" | ")}.` : "",
-    examples: examples?.length
+    terms: terms.length ? `NYC terms you may see: ${terms.map((t) => `${t.term} = ${t.definition}`).join(" | ")}.` : "",
+    examples: examples.length
       ? `Examples of great answers: ${examples.map((e) => `mood "${e.mood}" -> ${e.example_output}`).join(" ; ")}.`
       : "",
   };
@@ -173,14 +177,16 @@ export async function saveChainLogs(
         .insert({ prompt_chain_id: result.chainId, spot_request_id: requestId, profile_id: userId })
         .select("id")
         .single();
-      runId = data?.id ?? null;
+      runId = (data as { id: number } | null)?.id ?? null;
     }
 
     const modelIds = [...new Set(result.logs.map((l) => l.providerModelId).filter(Boolean))] as string[];
-    const { data: models } = modelIds.length
-      ? await supabase.from("llm_models").select("id, provider_model_id").in("provider_model_id", modelIds)
-      : { data: [] as { id: number; provider_model_id: string }[] };
-    const idFor = (m: string | null) => models?.find((x) => x.provider_model_id === m)?.id ?? null;
+    let models: { id: number; provider_model_id: string }[] = [];
+    if (modelIds.length) {
+      const { data } = await supabase.from("llm_models").select("id, provider_model_id").in("provider_model_id", modelIds);
+      models = (data ?? []) as { id: number; provider_model_id: string }[];
+    }
+    const idFor = (m: string | null) => models.find((x) => x.provider_model_id === m)?.id ?? null;
 
     await supabase.from("llm_responses").insert(
       result.logs.map((log) => ({
