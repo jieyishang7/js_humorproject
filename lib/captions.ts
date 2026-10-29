@@ -9,6 +9,7 @@ export type Caption = {
   created_at: string;
   score: number;
   myVote: -1 | 0 | 1;
+  imageUrl: string | null;
 };
 
 export type Upload = { id: number; image_url: string; created_at: string };
@@ -30,6 +31,14 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
     return [];
   }
 
+  // AI pictures of recommended spots (newest per spot). Optional: ignored if the table is missing.
+  const images = new Map<number, string>();
+  const { data: imageRows } = await supabase
+    .from("spot_images")
+    .select("caption_id, image_url")
+    .order("created_datetime_utc", { ascending: true });
+  for (const img of (imageRows ?? []) as { caption_id: number; image_url: string }[]) images.set(img.caption_id, img.image_url);
+
   return data
     .map((row) => {
       const votes = (row.caption_votes ?? []) as { value: number; user_id: string }[];
@@ -43,6 +52,7 @@ export async function getCaptions(userId: string | null): Promise<Caption[]> {
         created_at: row.created_at,
         score: votes.reduce((sum, v) => sum + v.value, 0),
         myVote: mine as Caption["myVote"],
+        imageUrl: images.get(row.id) ?? null,
       };
     })
     .sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at));
