@@ -56,17 +56,11 @@ function CaptionRow(props: { caption: Caption; signedIn: boolean; leader: boolea
           <figure className="spot-photo">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="spot-image" src={image.url} alt={image.label} loading="lazy" referrerPolicy="no-referrer" />
-            <figcaption className="spot-photo-tag">{image.label}</figcaption>
-            {isAi ? (
-              <span className="spot-photo-badge" title={image.source}>
-                AI image
-              </span>
-            ) : image.link ? (
+            <figcaption className="spot-photo-tag">{friendlyLabel(image.label)}</figcaption>
+            {!isAi && image.link && (
               <a className="spot-photo-badge" href={image.link} target="_blank" rel="noopener noreferrer">
                 {image.source}
               </a>
-            ) : (
-              <span className="spot-photo-badge">{image.source}</span>
             )}
           </figure>
         )}
@@ -82,6 +76,13 @@ function CaptionRow(props: { caption: Caption; signedIn: boolean; leader: boolea
       </div>
     </li>
   );
+}
+
+/** "See: X" -> "👀 Don't miss: X", "Try: X" -> "🍴 Must try: X". */
+function friendlyLabel(label: string) {
+  if (label.startsWith("See: ")) return `👀 Don't miss: ${label.slice(5)}`;
+  if (label.startsWith("Try: ")) return `🍴 Must try: ${label.slice(5)}`;
+  return label;
 }
 
 /** Place recommendations render as name + neighborhood + reason; anything else as plain text. */
